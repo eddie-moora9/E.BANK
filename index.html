@@ -51,18 +51,7 @@
 
 <body class="loading p-4">
 
-    <!-- ۱. Splash Screen (لوگوی شروع) -->
-    <div id="splash-screen" class="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center">
-        <div class="relative">
-            <div class="w-20 h-20 bg-gradient-to-tr from-emerald-500 to-emerald-400 rounded-2xl flex items-center justify-center shadow-[0_0_40px_rgba(16,185,129,0.3)] animate-pulse">
-                <i class="fas fa-university text-white text-3xl"></i>
-            </div>
-            <div class="absolute -inset-4 bg-emerald-500/10 blur-3xl rounded-full"></div>
-        </div>
-        <div class="mt-6 text-center">
-            <h1 class="text-2xl font-black text-white tracking-[0.2em] ml-2">E<span class="text-emerald-500">.</span>BANK</h1>
-        </div>
-    </div>
+
 
     <!-- ۲. کارت لاگین اصلی (گوشه‌ها اصلاح شد) -->
     <div class="login-card w-full max-w-sm p-8 rounded-[2.5rem]">
@@ -126,7 +115,7 @@
         const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(() => {
+           setTimeout(() => {
                 const splash = document.getElementById('splash-screen');
                 if (splash) {
                     splash.style.opacity = '0';
@@ -137,33 +126,80 @@
             if (lastPool) document.getElementById('login-pool-code').value = lastPool;
         });
 
-        async function handleLogin() {
-            const poolCode = document.getElementById('login-pool-code').value.trim().toUpperCase();
-            const mobile = document.getElementById('login-mobile').value.trim();
-            const password = document.getElementById('login-password').value;
-            const btn = document.getElementById('login-btn');
-            
-            if (!poolCode || !mobile || !password) return alert("فیلدها را پر کنید");
-            btn.innerText = "تایید اعتبار..."; btn.disabled = true;
-            
-            try {
-                const { data: pool } = await supabaseClient.from('pools').select('id').eq('pool_code', poolCode).maybeSingle();
-                if (!pool) { btn.disabled = false; btn.innerText = "تایید هویت و ورود"; return alert("❌ کد بانک غلط است"); }
-                
-                const { data: user } = await supabaseClient.from('members').select('*').eq('pool_id', pool.id).eq('mobile', mobile).eq('password', password).maybeSingle();
-                if (!user) { btn.disabled = false; btn.innerText = "تایید هویت و ورود"; return alert("❌ مشخصات اشتباه است"); }
-                
-                localStorage.clear(); sessionStorage.clear();
-                sessionStorage.setItem('user_id', user.id);
-                sessionStorage.setItem('pool_id', user.pool_id);
-                sessionStorage.setItem('user_name', user.full_name);
-                sessionStorage.setItem('is_admin', String(user.is_admin));
-                localStorage.setItem('saved_pool_code', poolCode);
-                localStorage.setItem('is_super_admin', (user.is_super_admin === true || mobile === '09120612550') ? 'true' : 'false');
-                
-                window.location.replace(user.is_admin ? 'admin.html' : 'member.html');
-            } catch (e) { alert("خطا: " + e.message); btn.disabled = false; }
+       async function handleLogin() {
+    const poolCode = document.getElementById('login-pool-code').value.trim().toUpperCase();
+    const mobile = document.getElementById('login-mobile').value.trim();
+    const password = document.getElementById('login-password').value;
+    const btn = document.getElementById('login-btn');
+    
+    if (!poolCode || !mobile || !password) return alert("لطفاً تمام کادرهای امنیتی را پر کنید ❌");
+    btn.innerText = "در حال تایید اعتبار..."; 
+    btn.disabled = true;
+    
+    try {
+        // ۱. پیدا کردن صندوق
+        const { data: pool, error: pErr } = await supabaseClient
+            .from('pools')
+            .select('id')
+            .eq('pool_code', poolCode)
+            .maybeSingle();
+        
+        if (pErr) throw pErr;
+        if (!pool) {
+            btn.disabled = false; btn.innerText = "تایید هویت و ورود";
+            return alert("❌ کد بانک (Pool ID) اشتباه است!");
         }
+        
+        // ۲. پیدا کردن عضو
+        const { data: user, error: uErr } = await supabaseClient
+            .from('members')
+            .select('*')
+            .eq('pool_id', pool.id)
+            .eq('mobile', mobile)
+            .eq('password', password)
+            .maybeSingle();
+        
+        if (uErr) throw uErr;
+        
+        if (!user) {
+            btn.disabled = false; btn.innerText = "تایید هویت و ورود";
+            return alert("❌ شماره موبایل یا رمز عبور اشتباه است!");
+        }
+        
+        // ۳. مدیریت حافظه هوشمند (پاکسازی و ذخیره دوگانه)
+        localStorage.clear(); 
+        sessionStorage.clear();
+
+        // الف) ذخیره در Session (برای امنیت جابجایی بین صفحات)
+        sessionStorage.setItem('user_id', user.id);
+        sessionStorage.setItem('pool_id', user.pool_id);
+        sessionStorage.setItem('user_name', user.full_name);
+        sessionStorage.setItem('is_admin', String(user.is_admin));
+        sessionStorage.setItem('is_super_admin', String(user.is_super_admin));
+
+        // ب) ذخیره در Local (برای شناسایی دکمه شبح و پایداری)
+        localStorage.setItem('user_id', user.id);
+        localStorage.setItem('pool_id', user.pool_id);
+        localStorage.setItem('saved_pool_code', poolCode);
+        
+        // تایید نهایی وضعیت سوپر ادمین
+        const isSuper = (user.is_super_admin === true || mobile === '09120612550') ? 'true' : 'false';
+        localStorage.setItem('is_super_admin', isSuper);
+        
+        // ۴. هدایت هوشمند
+        alert(`خوش آمدید ${user.full_name} ✅`);
+        if (user.is_admin === true) {
+            window.location.replace('admin.html');
+        } else {
+            window.location.replace('member.html');
+        }
+        
+    } catch (e) {
+        alert("خطا در برقراری ارتباط: " + e.message);
+        btn.disabled = false;
+        btn.innerText = "تلاش مجدد";
+    }
+}
     </script>
 </body>
 </html>

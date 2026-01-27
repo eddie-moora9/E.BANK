@@ -1,58 +1,131 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ستاد فرماندهی | سوپر ادمین</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>E.BANK | COMMAND CENTER</title>
+    
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;900&display=swap');
-        body { font-family: 'Vazirmatn', sans-serif; background-color: #0f172a; color: white; }
-        .gold-border { border: 1px solid rgba(234, 179, 8, 0.3); }
-    </style>
-    
-    <!-- تنظیمات آیکون برای اندروید و PWA -->
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#064e3b">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 
-<!-- تنظیمات آیکون برای آیفون (iOS) -->
-<link rel="apple-touch-icon" href="icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
+        
+        body { 
+            font-family: 'Vazirmatn', sans-serif; 
+            background-color: #020617; 
+            color: #f8fafc;
+            min-height: 100vh;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .glass-card {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .gold-gradient {
+            background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .revenue-glow {
+            box-shadow: 0 0 30px rgba(251, 191, 36, 0.15);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+        }
+
+        .btn-action {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-action:active { transform: scale(0.92); }
+
+        ::-webkit-scrollbar { display: none; }
+        
+        /* انیمیشن برای اعداد */
+        .count-up { transition: all 2s ease-out; }
+    </style>
 </head>
-<body class="p-6">
-    
-    
-    
-    <header class="flex justify-between items-center mb-10">
+<body class="p-4 pb-24">
+
+    <!-- هدر ستاد -->
+    <header class="flex justify-between items-center py-6 px-2 mb-4">
         <div>
-            <h1 class="text-xl font-black text-yellow-500">پنل سوپر ادمین</h1>
-            <p class="text-[10px] text-slate-400">نظارت بر کل تراکنش‌ها و صندوق‌ها</p>
+            <h1 class="text-2xl font-[900] tracking-tighter text-white">COMMAND <span class="text-yellow-500">CENTER</span></h1>
+            <div class="flex items-center gap-2 mt-1">
+                <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                <p class="text-[8px] text-slate-500 font-black uppercase tracking-[0.3em]">System Overseer Active</p>
+            </div>
         </div>
-        <button onclick="location.href='admin.html'" class="w-10 h-10 bg-slate-800 rounded-xl flex items-center justify-center text-yellow-500"><i class="fas fa-home"></i></button>
+        <button onclick="location.href='admin.html'" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-yellow-500 border border-yellow-500/20 shadow-lg shadow-yellow-500/5">
+            <i class="fas fa-th-large text-xl"></i>
+        </button>
     </header>
 
-    <!-- آمار کل سیستم -->
-    <div class="grid grid-cols-2 gap-4 mb-8">
-        <div class="bg-slate-800 p-5 rounded-3xl gold-border">
-            <p class="text-[9px] text-slate-400 mb-1">تعداد کل صندوق‌ها</p>
-            <h2 id="total-pools" class="text-2xl font-black text-yellow-500">۰</h2>
-        </div>
-        <div class="bg-slate-800 p-5 rounded-3xl gold-border">
-            <p class="text-[9px] text-slate-400 mb-1">کل اعضای پلتفرم</p>
-            <h2 id="total-users" class="text-2xl font-black text-yellow-500">۰</h2>
-        </div>
-    </div>
+    <main class="space-y-6">
+        
+        <!-- کارت خزانه کل (مجموع درآمد شما) -->
+        <section class="glass-card p-8 rounded-[3rem] revenue-glow relative overflow-hidden">
+            <div class="relative z-10">
+                <p class="text-[10px] font-black text-yellow-500/60 uppercase tracking-widest mb-2">Total Platform Revenue</p>
+                <h4 class="text-xs text-slate-400 font-bold mb-1">جمع کل واریزی‌های اشتراک و سهمیه:</h4>
+                <h2 id="total-revenue-amt" class="text-4xl font-[900] text-white tracking-tighter">۰ <span class="text-sm font-normal text-slate-500">تومان</span></h2>
+                
+                <div class="flex items-center gap-4 mt-6">
+                    <div class="bg-white/5 rounded-2xl p-3 flex-1 border border-white/5">
+                        <p class="text-[8px] text-slate-500 mb-1">تعداد گروه‌ها</p>
+                        <p id="total-pools" class="text-lg font-black text-yellow-500">۰</p>
+                    </div>
+                    <div class="bg-white/5 rounded-2xl p-3 flex-1 border border-white/5">
+                        <p class="text-[8px] text-slate-500 mb-1">کل کاربران</p>
+                        <p id="total-users" class="text-lg font-black text-white">۰</p>
+                    </div>
+                </div>
+            </div>
+            <!-- دکور پشت کارت -->
+            <i class="fas fa-vault absolute -bottom-10 -left-10 text-[10rem] opacity-[0.03] -rotate-12 text-yellow-500"></i>
+        </section>
 
-    <!-- لیست صندوق‌های فعال -->
-    <h3 class="text-sm font-black mb-4 flex items-center gap-2">
-        <i class="fas fa-list text-yellow-500"></i> لیست تمام گروه‌ها
-    </h3>
-    <div id="pools-list" class="space-y-3">
-        <p class="text-center text-xs text-slate-500">در حال دریافت اطلاعات...</p>
-    </div>
+        <!-- بخش ابزارهای گزارش‌گیری -->
+        <section class="flex justify-between items-center px-4">
+            <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <i class="fas fa-file-invoice-dollar text-yellow-500"></i>
+                تراکنش‌های مدیران
+            </h3>
+            <button onclick="exportBillingToExcel()" class="btn-action bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 px-4 py-2 rounded-2xl text-[10px] font-black flex items-center gap-2">
+                <i class="fas fa-file-excel"></i>
+                خروجی اکسل
+            </button>
+        </section>
+
+        <!-- جدول تراکنش‌ها (دیزاین فلت موبایلی) -->
+        <section id="billing-container" class="space-y-3">
+            <!-- ردیف‌های تراکنش توسط JS به صورت کارت‌های کوچک ساخته می‌شوند -->
+            <div class="text-center py-10 text-slate-600 text-xs">در حال لود لیست مالی...</div>
+        </section>
+
+        <!-- لیست مدیریت صندوق‌ها -->
+        <section class="space-y-4 pt-4">
+            <h3 class="text-sm font-black px-4 text-white flex items-center gap-2">
+                <i class="fas fa-server text-yellow-500"></i>
+                نظارت و کنترل گروه‌ها
+            </h3>
+            <div id="pools-list" class="space-y-4">
+                <!-- لیست صندوق‌ها اینجا رندر می‌شود -->
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="mt-16 pb-10 text-center">
+        <p class="text-[7px] font-black text-slate-700 uppercase tracking-[0.5em]">
+            Developed by <span class="text-yellow-600">EDDIE</span> | Command Panel v3.0
+        </p>
+    </footer>
 
     <script src="super_admin_app.js"></script>
 </body>
