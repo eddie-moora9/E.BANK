@@ -7,126 +7,264 @@
     
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- حتماً این خط رو قبل از فایل super_admin_app.js بذار 👇 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+<!-- حتماً این خط رو قبل از فایل super_admin_app.js بذار 👇 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
-        
-        body { 
-            font-family: 'Vazirmatn', sans-serif; 
-            background-color: #020617; 
-            color: #f8fafc;
-            min-height: 100vh;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        .glass-card {
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-        }
-
-        .gold-gradient {
-            background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .revenue-glow {
-            box-shadow: 0 0 30px rgba(251, 191, 36, 0.15);
-            border: 1px solid rgba(251, 191, 36, 0.3);
-        }
-
-        .btn-action {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .btn-action:active { transform: scale(0.92); }
-
-        ::-webkit-scrollbar { display: none; }
-        
-        /* انیمیشن برای اعداد */
-        .count-up { transition: all 2s ease-out; }
-    </style>
 </head>
-<body class="p-4 pb-24">
+   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
+    
+    html, body { height: 100%; margin: 0; }
+    body { 
+        font-family: 'Vazirmatn', sans-serif; 
+        background-color: #020617; 
+        color: #f8fafc;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        -webkit-tap-highlight-color: transparent;
+    }
 
-    <!-- هدر ستاد -->
-    <header class="flex justify-between items-center py-6 px-2 mb-4">
+    main { flex: 1 0 auto; padding: 15px; width: 100%; box-sizing: border-box; }
+    footer { flex-shrink: 0; width: 100%; text-align: center; padding: 40px 0; }
+
+    /* اصلاح عرض کادرها برای بزرگتر شدن 👇 */
+    .glass-card {
+        background: rgba(30, 41, 59, 0.7) !important;
+        backdrop-filter: blur(12px);
+        border: 1.5px solid rgba(251, 191, 36, 0.3) !important;
+        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        width: 100%; /* استفاده از تمام عرض */
+        border-radius: 2.5rem;
+        margin-bottom: 20px;
+        padding: 25px;
+        box-sizing: border-box;
+    }
+
+    /* استایل دکمه‌های کرکره‌ای 👇 */
+    .toggle-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 20px;
+        cursor: pointer;
+        border: 1px solid rgba(255,255,255,0.05);
+        transition: all 0.3s;
+    }
+    .toggle-header:active { background: rgba(255, 255, 255, 0.08); }
+    
+    .collapsible-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.5s cubic-bezier(0, 1, 0, 1);
+    }
+    .collapsible-content.open {
+        max-height: 2000px; /* یک عدد بزرگ برای باز شدن کامل */
+        transition: max-height 0.8s ease-in-out;
+        padding-top: 20px;
+    }
+
+    .rotate-icon { transition: transform 0.3s; }
+    .rotate-icon.open { transform: rotate(180deg); }
+
+    ::-webkit-scrollbar { display: none; }
+</style>
+
+<body class="p-0">
+
+    <header class="p-6 flex justify-between items-center">
         <div>
-            <h1 class="text-2xl font-[900] tracking-tighter text-white">COMMAND <span class="text-yellow-500">CENTER</span></h1>
-            <div class="flex items-center gap-2 mt-1">
-                <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                <p class="text-[8px] text-slate-500 font-black uppercase tracking-[0.3em]">System Overseer Active</p>
-            </div>
+            <h1 class="text-2xl font-[900] text-white">COMMAND <span class="text-yellow-500">CENTER</span></h1>
+            <p class="text-[8px] text-slate-500 font-black tracking-widest mt-1">SYSTEM OVERSEER ACTIVE</p>
         </div>
-        <button onclick="location.href='admin.html'" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-yellow-500 border border-yellow-500/20 shadow-lg shadow-yellow-500/5">
+        <button onclick="location.href='admin.html'" class="w-12 h-12 glass-card !m-0 !p-0 flex items-center justify-center text-yellow-500">
             <i class="fas fa-th-large text-xl"></i>
         </button>
     </header>
 
-    <main class="space-y-6">
+    <main>
+        <!-- تنظیمات کارت (بزرگ) -->
+       <!-- بخش کارت بانکی هوشمند ستاد -->
+<!-- بخش کارت بانکی هوشمند ستاد - نسخه اصلاح شده و فیت -->
+<section class="mb-10 px-2">
+    <div class="relative w-full rounded-[2rem] p-6 overflow-hidden shadow-2xl border border-white/10" 
+         style="background: linear-gradient(135deg, #1e293b 0%, #020617 100%); min-height: 200px;">
         
-        <!-- کارت خزانه کل (مجموع درآمد شما) -->
-        <section class="glass-card p-8 rounded-[3rem] revenue-glow relative overflow-hidden">
-            <div class="relative z-10">
-                <p class="text-[10px] font-black text-yellow-500/60 uppercase tracking-widest mb-2">Total Platform Revenue</p>
-                <h4 class="text-xs text-slate-400 font-bold mb-1">جمع کل واریزی‌های اشتراک و سهمیه:</h4>
-                <h2 id="total-revenue-amt" class="text-4xl font-[900] text-white tracking-tighter">۰ <span class="text-sm font-normal text-slate-500">تومان</span></h2>
-                
-                <div class="flex items-center gap-4 mt-6">
-                    <div class="bg-white/5 rounded-2xl p-3 flex-1 border border-white/5">
-                        <p class="text-[8px] text-slate-500 mb-1">تعداد گروه‌ها</p>
-                        <p id="total-pools" class="text-lg font-black text-yellow-500">۰</p>
-                    </div>
-                    <div class="bg-white/5 rounded-2xl p-3 flex-1 border border-white/5">
-                        <p class="text-[8px] text-slate-500 mb-1">کل کاربران</p>
-                        <p id="total-users" class="text-lg font-black text-white">۰</p>
-                    </div>
+        <!-- ردیف اول: لوگو و چیپ -->
+        <div class="flex justify-between items-center mb-8">
+            <h2 class="text-xl font-[900] text-yellow-500 tracking-tighter">E<span class="text-white">.</span>BANK</h2>
+            <!-- آیکون چیپ بانکی -->
+            <div class="w-10 h-8 bg-gradient-to-br from-yellow-600 to-yellow-300 rounded-md opacity-80 flex flex-col justify-around p-1">
+                <div class="h-[1px] bg-black/20 w-full"></div>
+                <div class="h-[1px] bg-black/20 w-full"></div>
+                <div class="h-[1px] bg-black/20 w-full"></div>
+            </div>
+        </div>
+
+        <!-- ردیف دوم: شماره کارت (فیکس شده برای موبایل) -->
+        <div class="mb-6">
+            <input type="tel" id="master-card-input" placeholder="0000 0000 0000 0000" maxlength="16"
+                class="w-full bg-transparent border-none text-center text-[1.35rem] font-black text-white tracking-[0.05em] outline-none placeholder:text-slate-800"
+                style="font-family: monospace;">
+        </div>
+        
+        <!-- ردیف سوم: صاحب حساب و نشان امنیتی -->
+        <div class="flex justify-between items-end">
+            <div class="text-right flex-1">
+                <p class="text-[7px] text-slate-500 uppercase font-black mb-1 tracking-widest">Card Holder</p>
+                <input type="text" id="master-card-name-input" placeholder="نام صاحب حساب"
+                    class="w-full bg-transparent border-none text-sm font-bold text-yellow-500 outline-none placeholder:text-slate-800">
+            </div>
+            
+            <!-- آیکون ویزا/مستر کارت سمبلیک -->
+            <div class="flex gap-1 opacity-40 ml-4">
+                <div class="w-7 h-7 bg-rose-600 rounded-full"></div>
+                <div class="w-7 h-7 bg-amber-500 rounded-full -ml-4"></div>
+            </div>
+        </div>
+
+        <!-- افکت نوری بسیار ملایم -->
+        <div class="absolute -top-10 -right-10 w-32 h-32 bg-yellow-500/10 rounded-full blur-3xl"></div>
+    </div>
+
+    <!-- دکمه ذخیره زیر کارت -->
+    <button onclick="saveMasterCard()" class="btn-action w-full mt-4 bg-yellow-500 text-slate-950 py-4 rounded-2xl font-[900] text-sm shadow-xl shadow-yellow-500/10 flex items-center justify-center gap-2">
+        <i class="fas fa-save"></i>
+        ذخیره تنظیمات کارت بانکی
+    </button>
+</section>
+
+        <!-- خزانه کل -->
+        <section class="glass-card">
+            <p class="text-[10px] font-black text-yellow-500/60 uppercase mb-2">Total Revenue</p>
+            <h2 id="total-revenue-amt" class="text-4xl font-[900] text-white tracking-tighter">۰ تومان</h2>
+            <div class="flex gap-3 mt-4">
+                <div class="bg-white/5 p-3 rounded-2xl flex-1 text-center border border-white/5">
+                    <p class="text-[20px] text-slate-500">گروه‌ها: <span id="total-pools" class="text-yellow-500 font-black">۰</span></p>
+                </div>
+                <div class="bg-white/5 p-3 rounded-2xl flex-1 text-center border border-white/5">
+                    <p class="text-[20px] text-slate-500">کاربران: <span id="total-users" class="text-white font-black">۰</span></p>
                 </div>
             </div>
-            <!-- دکور پشت کارت -->
-            <i class="fas fa-vault absolute -bottom-10 -left-10 text-[10rem] opacity-[0.03] -rotate-12 text-yellow-500"></i>
         </section>
 
-        <!-- بخش ابزارهای گزارش‌گیری -->
-        <section class="flex justify-between items-center px-4">
-            <h3 class="text-sm font-black text-white flex items-center gap-2">
-                <i class="fas fa-file-invoice-dollar text-yellow-500"></i>
-                تراکنش‌های مدیران
-            </h3>
-            <button onclick="exportBillingToExcel()" class="btn-action bg-emerald-600/10 text-emerald-400 border border-emerald-500/20 px-4 py-2 rounded-2xl text-[10px] font-black flex items-center gap-2">
-                <i class="fas fa-file-excel"></i>
-                خروجی اکسل
-            </button>
-        </section>
-
-        <!-- جدول تراکنش‌ها (دیزاین فلت موبایلی) -->
-        <section id="billing-container" class="space-y-3">
-            <!-- ردیف‌های تراکنش توسط JS به صورت کارت‌های کوچک ساخته می‌شوند -->
-            <div class="text-center py-10 text-slate-600 text-xs">در حال لود لیست مالی...</div>
-        </section>
-
-        <!-- لیست مدیریت صندوق‌ها -->
-        <section class="space-y-4 pt-4">
-            <h3 class="text-sm font-black px-4 text-white flex items-center gap-2">
-                <i class="fas fa-server text-yellow-500"></i>
-                نظارت و کنترل گروه‌ها
-            </h3>
-            <div id="pools-list" class="space-y-4">
-                <!-- لیست صندوق‌ها اینجا رندر می‌شود -->
+        <!-- بخش کرکره‌ای: تراکنش‌های مالی 👇 -->
+        <section class="mb-6">
+            <div class="toggle-header" onclick="toggleAccordion('billing-box', 'icon1')">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-file-invoice-dollar text-yellow-500"></i>
+                    <h3 class="text-sm font-black text-white">گزارش واریزی مدیران</h3>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="event.stopPropagation(); exportBillingToExcel()" class="bg-emerald-600/20 text-emerald-400 p-2 rounded-lg text-[10px]"><i class="fas fa-file-excel"></i></button>
+                    <i id="icon1" class="fas fa-chevron-down text-slate-500 rotate-icon"></i>
+                </div>
+            </div>
+            <div id="billing-box" class="collapsible-content">
+                <div id="billing-container" class="space-y-3">
+                    <!-- لیست تراکنش‌ها -->
+                </div>
             </div>
         </section>
 
+        <!-- بخش کرکره‌ای: مدیریت بانک‌ها 👇 -->
+        <section class="mb-6">
+            <div class="toggle-header" onclick="toggleAccordion('pools-box', 'icon2')">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-layer-group text-yellow-500"></i>
+                    <h3 class="text-sm font-black text-white">نظارت بر بانک‌های موجود</h3>
+                </div>
+                <i id="icon2" class="fas fa-chevron-down text-slate-500 rotate-icon"></i>
+            </div>
+            <div id="pools-box" class="collapsible-content">
+                <div id="pools-list" class="space-y-4">
+                    <!-- لیست صندوق‌ها -->
+                </div>
+            </div>
+        </section>
+        
+        <!-- بخش کرکره‌ای: تنظیمات امنیتی ستاد 👇 -->
+<!-- بخش کرکره‌ای: مدیریت امنیت دو مرحله‌ای 👇 -->
+<section class="mb-10 px-2">
+    <div class="toggle-header !border-rose-500/30" onclick="toggleAccordion('security-box', 'icon3')" 
+         style="background: rgba(244, 63, 94, 0.05);">
+        <div class="flex items-center gap-3">
+            <!-- در فایل super_admin.html بخش هدر کرکره امنیت را به این شکل اصلاح کن 👇 -->
+<div class="w-10 h-10 bg-rose-500/20 rounded-2xl flex items-center justify-center border border-rose-500/30">
+    <i class="fas fa-fingerprint text-rose-500 text-lg"></i>
+</div>
+            <div>
+                <h3 class="text-sm font-[900] text-white">امنیت و کلیدهای دسترسی</h3>
+                <p class="text-[7px] text-rose-500/60 uppercase font-black tracking-widest">Master Security Protocol</p>
+            </div>
+        </div>
+        <i id="icon3" class="fas fa-chevron-down text-slate-500 rotate-icon"></i>
+    </div>
+
+    <div id="security-box" class="collapsible-content">
+        <!-- محفظه کلیدها -->
+        <div class="bg-slate-900/50 rounded-[2rem] p-6 border border-white/5 mt-4 space-y-4">
+            
+            <!-- مرحله اول: رمز عبور متنی -->
+            <div class="p-4 bg-white/5 rounded-2xl border border-white/5">
+                <p class="text-[10px] text-slate-400 mb-3 flex items-center gap-2">
+                    <span class="w-1 h-1 bg-rose-500 rounded-full"></span>
+                    لایه اول: رمز عبور ورود به ستاد
+                </p>
+                <button onclick="handleChangeMasterPassword()" class="btn-action w-full bg-slate-950 text-white border border-white/10 py-4 rounded-xl font-black text-[10px] flex items-center justify-center gap-2">
+                    <i class="fas fa-fingerprint text-rose-500"></i>
+                    تغییر پسورد اصلی (STEP 1)
+                </button>
+            </div>
+
+            <!-- مرحله دوم: عدد مخفی فرمول -->
+            <div class="p-4 bg-white/5 rounded-2xl border border-white/5">
+                <p class="text-[10px] text-slate-400 mb-3 flex items-center gap-2">
+                    <span class="w-1 h-1 bg-yellow-500 rounded-full"></span>
+                    لایه دوم: عدد ثابت فرمول ریاضی (2FA)
+                </p>
+                <button onclick="handleChangeSecretNumber()" class="btn-action w-full bg-slate-950 text-white border border-white/10 py-4 rounded-xl font-black text-[10px] flex items-center justify-center gap-2">
+                    <i class="fas fa-calculator text-yellow-500"></i>
+                    تغییر عدد مخفی (STEP 2)
+                </button>
+            </div>
+
+            <p class="text-[8px] text-center text-slate-600 font-bold italic">
+                تغییر این کلیدها بلافاصله اعمال شده و در ورود بعدی الزامی است.
+            </p>
+        </div>
+        <!-- در فایل super_admin.html داخل کرکره امنیت -->
+<div class="p-4 bg-white/5 rounded-2xl border border-white/5 mt-4">
+    <p class="text-[10px] text-slate-400 mb-3 flex items-center gap-2">
+        <span class="w-1 h-1 bg-blue-500 rounded-full"></span>
+        ماشه ورود مخفی (عدد ثابت کلیک)
+    </p>
+    <div class="flex gap-2">
+        <input type="number" id="click-constant-input" class="flex-1 bg-slate-950 border-none rounded-xl p-3 text-center text-blue-400 font-black text-sm outline-none">
+        <button onclick="saveClickConstant()" class="bg-blue-600 text-white px-4 rounded-xl font-bold text-xs btn-tap">ذخیره</button>
+    </div>
+</div>
+    </div>
+</section>
+        
+        
     </main>
 
-    <footer class="mt-16 pb-10 text-center">
-        <p class="text-[7px] font-black text-slate-700 uppercase tracking-[0.5em]">
-            Developed by <span class="text-yellow-600">EDDIE</span> | Command Panel v3.0
+    <footer>
+        <p class="text-[11px] font-black text-slate-500 uppercase tracking-[0.4em]">
+            Designed by <span class="text-yellow-500">EDDIE</span>
+            <br>
+            <span class="text-[8px] opacity-20 mt-1 block">COMMAND CENTER V3.5</span>
         </p>
     </footer>
 
     <script src="super_admin_app.js"></script>
+   
 </body>
 </html>

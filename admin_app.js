@@ -1,183 +1,371 @@
-/************************************************
- * ۱. تنظیمات اتصال و متغیرهای سراسری
- ************************************************/
-var SUPABASE_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
-var SUPABASE_KEY = 'sb_publishable_ZqXeccdaSzZUivCwU38WcQ_m05uT4y6';
-var supabaseClient = null;
+/* ==================================================
+   E.BANK ADMIN - INITIALIZATION (v11.7)
+   ================================================== */
 
-// تابع راه‌اندازی اتصال (ضد کرش)
+// ۱. تعریف ثابت‌های اتصال (نام‌ها هماهنگ شد) ✅
+const S_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
+const S_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxbnNibnB6bmt3a3d1a3pva2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDc4NjgsImV4cCI6MjA4MjEyMzg2OH0.dsqyFP37JyrfYDVwasNZW_Aid9ah0e6SxdnS8j8xV5s';
+
+var supabaseClient = null;
+var allMembersData = [];
+var selectedMemberForReport = null;
+var allProjectsDataCache = [];
+
+// ۲. تابع مقداردهی اولیه به دیتابیس (نسخه استاندارد و پایدار) ✅
 function initSupabase() {
     if (typeof supabase !== 'undefined' && !supabaseClient) {
-        // دقت کن: S و U در Supabase و C در createClient
-        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        supabaseClient = supabase.createClient(S_URL, S_KEY, {
+            auth: {
+                persistSession: true,
+                storageKey: 'ebank-auth-session', // دقیقاً هماهنگ با فایل‌های دیگر
+                storage: window.localStorage,     // استفاده از حافظه پایدار
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        });
+        console.log("✅ اتصال مدیر به دیتابیس برقرار شد.");
         return true;
     }
     return !!supabaseClient;
 }
 
-var allMembersData = [];
-var selectedMemberForReport = null;
 
 
-window.showAdminSec = function(btn, id) {
-    // ۱. لیست تمام بخش‌های موجود در HTML
+// تست ساده برای چک کردن
+async function testPoolInfo() {
+    const poolId = sessionStorage.getItem('pool_id');
+    console.log("Pool ID:", poolId);
+    
+    if (poolId) {
+        const { data, error } = await supabaseClient
+            .from('pools')
+            .select('*')
+            .eq('id', poolId)
+            .single();
+        
+        console.log("Pool Data:", data);
+        console.log("Error:", error);
+    }
+}
+
+
+/************************************************
+ * تابع تولید مدال‌های افتخار
+ ************************************************/
+window.generateMemberBadges = function(member) {
+    let html = '';
+    const score = member.credit_score || 100;
+    
+    // الماس خوش‌حساب
+    if (score >= 100) {
+        html += `<div class="badge-icon bg-cyan-500" title="الماس خوش‌حسابی"><i class="fas fa-gem"></i></div>`;
+    }
+    
+    // همیار (بخشنده نوبت)
+    if (member.turn_given_count > 0) {
+        html += `<div class="badge-icon bg-emerald-500" title="یارِ صندوق"><i class="fas fa-hands-helping"></i></div>`;
+    }
+    
+    // پیشکسوت (قدیمی‌تر از ۶ ماه)
+    if (member.created_at) {
+        const joinDate = new Date(member.created_at);
+        const monthsDiff = (new Date() - joinDate) / (1000 * 60 * 60 * 24 * 30);
+        if (monthsDiff > 6) {
+            html += `<div class="badge-icon bg-purple-500" title="پیشکسوت"><i class="fas fa-shield-alt"></i></div>`;
+        }
+    }
+
+    // هشدار تسویه
+    if (score < 40) {
+        html += `<div class="badge-icon bg-rose-500 animate-pulse" title="هشدار تسویه"><i class="fas fa-exclamation-triangle"></i></div>`;
+    }
+
+    return html ? `<div class="badge-container">${html}</div>` : '';
+};
+
+
+// ۳. ترفند شیک‌سازی خودکار Alertها برای مدیر
+window.alert = function(message) {
+    Swal.fire({
+        text: message,
+        icon: 'info',
+        confirmButtonText: 'متوجه شدم',
+        confirmButtonColor: '#4f46e5',
+        customClass: { popup: 'rounded-[2rem]' }
+    });
+};
+
+
+/************************************************
+ * تابع هوشمند تولید مدال‌های افتخار (Badges)
+ ************************************************/
+
+
+
+
+ function toggleLoading(btnId, isLoading, loadingText = "در حال پردازش...") {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+
+    if (isLoading) {
+        // ذخیره متن فعلی دکمه در حافظه موقتِ خودش 👇
+        btn.dataset.originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <span class="mr-2">${loadingText}</span>`;
+    } else {
+        // برگرداندن متن اصلی به صورت خودکار ✅
+        btn.disabled = false;
+        if (btn.dataset.originalHtml) {
+            btn.innerHTML = btn.dataset.originalHtml;
+        }
+    }
+}
+
+// تابع امنیتی برای تبدیل رمز عبور به کد غیرقابل بازگشت (SHA-256)
+async function hashPassword(password) {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+
+const Validator = {
+    isMobile: (v) => /^09\d{9}$/.test(v),
+    isCard: (v) => /^\d{16}$/.test(v),
+    isMinLen: (v, l) => v.trim().length >= l
+};
+
+
+
+window.toggleDrawer = function(isOpen) {
+    const drawer = document.getElementById('admin-drawer');
+    const content = document.getElementById('drawer-content');
+    const overlay = document.getElementById('drawer-overlay');
+
+    if (isOpen) {
+        drawer.classList.remove('invisible');
+        overlay.classList.add('opacity-100');
+        content.classList.remove('translate-x-full');
+    } else {
+        overlay.classList.remove('opacity-100');
+        content.classList.add('translate-x-full');
+        setTimeout(() => drawer.classList.add('invisible'), 300);
+    }
+};
+
+window.openDrawerSection = function(sectionId) {
+    toggleDrawer(false); // اول منوی همبرگری رو ببند
+    
+    // شبیه سازی کلیک روی تب کنترل (چون تنظیمات اونجاست)
+    showAdminSec(null, sectionId);
+    
+    // اگر بخش تنظیمات باز شد، کرکره مربوطه رو هم اتوماتیک باز کن 👇
+    if (sectionId === 'admin-settings-sec') {
+        setTimeout(() => {
+            const firstAcc = document.getElementById('set-group-1');
+            if (firstAcc) {
+                firstAcc.classList.replace('max-h-0', 'max-h-screen');
+                document.getElementById('icon-set-1')?.classList.add('rotate-180');
+            }
+        }, 500);
+    }
+};
+
+/************************************************
+ * تابع مدیریت جابجایی بین بخش‌ها (نسخه اصلاح شده)
+ ************************************************/
+window.showAdminSec = function(btn, sectionId) {
+    // لیست تمام بخش‌های موجود در فایل HTML شما 👇
     const sections = [
         'admin-home-sec', 
-        'admin-verify-sec', 
-        'admin-loans-verify-sec', 
-        'admin-projects-sec', 
+        'admin-ops-sec', 
+        'admin-comm-sec', 
+        'admin-biz-sec', 
         'admin-members-sec', 
-        'admin-settings-sec'
+        'admin-settings-sec' // آیدی تنظیمات حتماً اینجا باشد ✅
     ];
 
-    // ۲. مخفی کردن تمام بخش‌ها
+    // ۱. مخفی کردن تمام بخش‌ها به صورت یکجا
     sections.forEach(s => {
         const el = document.getElementById(s);
         if (el) el.classList.add('hidden');
     });
 
-    // ۳. نمایش بخش انتخاب شده
-    const target = document.getElementById(id);
+    // ۲. نمایش بخش انتخاب شده
+    const target = document.getElementById(sectionId);
     if (target) {
         target.classList.remove('hidden');
-        console.log("تغییر وضعیت به بخش: " + id);
-    } else {
-        console.error("خطا: بخش با آیدی " + id + " یافت نشد!");
+        window.scrollTo(0, 0); // پرش به ابتدای صفحه
     }
+    
 
-    // ۴. مدیریت رنگ آیکون‌های منوی پایین
+    // ۳. مدیریت رنگ و استایل دکمه‌های منوی پایین
     document.querySelectorAll('.nav-btn').forEach(b => {
-        b.classList.remove('text-indigo-400');
+        b.classList.remove('active', 'text-indigo-400');
         b.classList.add('text-slate-500');
     });
 
-    // رنگی کردن دکمه‌ای که کلیک شده
-    if (btn) {
+    // مدیریت رنگ دکمه مرکزی (خانه)
+    const centerBtn = document.getElementById('nav-home');
+    if (centerBtn) centerBtn.classList.replace('bg-indigo-600', 'bg-slate-700');
+
+    if (sectionId === 'admin-home-sec') {
+        if (centerBtn) centerBtn.classList.replace('bg-slate-700', 'bg-indigo-600');
+    } else if (btn) {
+        btn.classList.add('active', 'text-indigo-400');
         btn.classList.remove('text-slate-500');
-        btn.classList.add('text-indigo-400');
     }
 
-    // لرزش خفیف گوشی برای بازخورد لمسی
-    if (window.navigator.vibrate) window.navigator.vibrate(15);
+    // ۴. لودرهای اختصاصی هر بخش
+    const pId = sessionStorage.getItem('pool_id');
+    
+ 
+if (sectionId === 'admin-ops-sec') {
+    const pId = sessionStorage.getItem('pool_id');
+    loadPendingReceipts(pId);   // لود فیش‌ها
+    loadAdminLoans(pId);        // لود درخواست‌های مساعده 👈 اضافه شد
+    loadOpsTabContent(pId);     // لود صف نوبت و بدهکاران
+}
+
+    
+    if (sectionId === 'admin-biz-sec') loadAdminProjects(pId);
+    if (sectionId === 'admin-members-sec') loadAllMembers(pId);
+    if (sectionId === 'admin-comm-sec') loadUnifiedStream();
 };
 
-/************************************************
- * ۲. موتور اصلی برنامه (DOMContentLoaded)
- ************************************************/
-/************************************************
- * موتور اصلی شروع به کار پنل مدیریت (INIT)
- ************************************************/
-document.addEventListener('DOMContentLoaded', async () => {
+
+// ۱. ابتدا تابع را بیرون از بلاک اصلی تعریف کن (برای نظم بیشتر)
+async function checkSubscriptionStatus(poolId) {
+    const displayHeader = document.getElementById('sub-days-display');
+    const displayLarge = document.getElementById('sub-days-left-large');
+    const pill = document.getElementById('sub-status-pill');
     
-    // ۱. حذف سریع لوگو (اسپلش اسکرین) تحت هر شرایطی
-    setTimeout(() => {
-        const splash = document.getElementById('splash-screen');
-        if (splash) {
-            splash.style.opacity = '0';
-            setTimeout(() => {
-                splash.remove();
-                document.body.classList.remove('loading');
-            }, 700);
-        }
-    }, 2000);
+        // داخل تابع showAdminSec
+const pId = sessionStorage.getItem('pool_id');
+updateTaskBadge(pId); // چک کردن مداوم وضعیت فیش‌ها ✅
 
-    // ۲. بررسی لود کتابخانه دیتابیس
-    if (!initSupabase()) {
-        console.log("در حال انتظار برای کتابخانه...");
-        setTimeout(() => location.reload(), 1500);
-        return;
-    }
 
-    // ۳. دریافت اطلاعات از حافظه موقت (Session)
-    const isAdmin = sessionStorage.getItem('is_admin');
-    const myPoolId = sessionStorage.getItem('pool_id');
-    const userId = sessionStorage.getItem('user_id');
-
-    // ۴. امنیت: بررسی لاگین مدیر
-    if (isAdmin !== 'true' || !myPoolId) {
-        window.location.replace('index.html');
-        return;
-    }
-
-    // ۵. بررسی وضعیت اشتراک، تاریخ انقضا و ظرفیت (بخش هوشمند)
     try {
-        // ابتدا اطلاعات صندوق را از دیتابیس واکشی می‌کنیم 👇
-        const { data: pool, error } = await supabaseClient
-            .from('pools')
-            .select('*')
-            .eq('id', myPoolId)
-            .maybeSingle();
-
-        if (error) throw error;
-
+        const { data: pool } = await supabaseClient.from('pools').select('sub_expiry, is_active').eq('id', poolId).single();
+        
         if (pool) {
             const now = new Date();
             const expiry = new Date(pool.sub_expiry);
-
-            // محاسبه اختلاف به میلی‌ثانیه و تبدیل به روز صاف (دقیق)
             const diffTime = expiry.getTime() - now.getTime();
-            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-            // الف) نمایش روزهای باقی‌مانده و تاریخ انقضا
-            const daysDisplay = document.getElementById('sub-days-display');
-            const dateDisplay = document.getElementById('sub-date-display');
+            // آپدیت متن در هدر و منوی همبرگری 👇
+            if (displayHeader) displayHeader.innerText = diffDays > 0 ? diffDays + " روز باقی‌مانده" : "منقضی شده ⚠️";
+            if (displayLarge) displayLarge.innerText = diffDays > 0 ? diffDays : "۰";
 
-            if (daysDisplay) {
-                daysDisplay.innerText = diffDays > 0 ? diffDays + " روز باقی‌مانده" : "اعتبار تمام شده ⚠️";
+            // تغییر رنگ هوشمند نشانگر (Pill)
+            if (pill) {
+                if (diffDays <= 0 || pool.is_active === false) {
+                    pill.className = "inline-flex items-center gap-1.5 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full mt-1 text-rose-600";
+                } else if (diffDays <= 7) {
+                    pill.className = "inline-flex items-center gap-1.5 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full mt-1 text-amber-600";
+                } else {
+                    pill.className = "inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full mt-1 text-emerald-600";
+                }
             }
-            if (dateDisplay) {
-                dateDisplay.innerText = "انقضا: " + expiry.toLocaleDateString('fa-IR');
-            }
 
-            // ب) نمایش ظرفیت سهمیه باقی‌مانده
-            const capElements = document.querySelectorAll('#member-capacity-display');
-            capElements.forEach(el => {
-                el.innerText = (pool.member_capacity || 0) + " سهمیه";
-            });
-
-            // ج) بررسی قفل بودن حساب (دستی یا انقضای زمان)
-            if (pool.is_active === false || diffDays <= 0) {
-                if (typeof showLockPage === 'function') showLockPage();
-                return; // توقف اجرای بقیه کدها
+            // لایه امنیتی: مسدود سازی اگر بیش از ۶ ساعت از انقضا گذشته بود
+            if (pool.is_active === false || diffTime < -21600000) {
+                if (typeof showLockPage === 'function') {
+                    showLockPage();
+                    return false; // یعنی مسدود است
+                }
             }
         }
-    } catch (err) { 
-        console.error("Security/Stats Check Error:", err.message); 
+        return true; // یعنی دسترسی باز است
+    } catch (e) { 
+        console.log("Sub Check Error"); 
+        return true;
     }
+}
 
-    // ۶. بارگذاری تمام توابع داشبورد مدیریت
-    calculateStats(myPoolId);
-    loadPendingReceipts(myPoolId);
-    loadAllMembers(myPoolId);
-    loadCurrentConfig(myPoolId);
-    loadAdminLoans(myPoolId);
-    loadAdminProjects(myPoolId);
-    
-    // ۷. اجرای ابزارهای سیستمی و اعلان
-    if (typeof injectSuperAdminButton === 'function') injectSuperAdminButton(userId);
-    if (typeof initSecretClick === 'function') initSecretClick();
-    if (typeof updateReceiptBadge === 'function') updateReceiptBadge(myPoolId);
-    if (typeof initOneSignalAdmin === 'function') initOneSignalAdmin(myPoolId);
+// ۲. حالا موتور اصلی برنامه
+document.addEventListener('DOMContentLoaded', async () => {
+    // حذف اسپلش (کدهای قبلی خودت...)
+    setTimeout(() => {
+        const splash = document.getElementById('splash-screen');
+        if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 700); }
+    }, 2500);
+
+    if (typeof initSupabase === 'function') initSupabase();
+    if (!supabaseClient) return;
+
+    try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (!session) { window.location.replace('index.html'); return; }
+
+        let _PID = sessionStorage.getItem('pool_id');
+        if (!_PID || _PID === "null") {
+            const { data: p } = await supabaseClient.from('members').select('pool_id').eq('id', session.user.id).single();
+            if (p) { _PID = p.pool_id; sessionStorage.setItem('pool_id', _PID); }
+        }
+
+        const homeSec = document.getElementById('admin-home-sec');
+        if (homeSec) homeSec.classList.remove('hidden');
+
+        // 🔥 مرحله طلایی: صدا زدن تابع چک اشتراک
+        const isAccessGranted = await checkSubscriptionStatus(_PID);
+        
+        // اگر دسترسی تایید شد، بقیه لودرها اجرا شوند
+        if (isAccessGranted) {
+            
+            testPoolInfo();
+            calculateStats(_PID);
+            loadPoolHeaderInfo(_PID);
+            loadAllMembers(_PID);
+            loadPendingReceipts(_PID);
+            loadAdminLoans(_PID);
+            loadLoanQueue(_PID);
+            loadAdminProjects(_PID);
+            loadCurrentConfig(_PID);
+           updateCapacityDisplay(_PID);
+            updateTaskBadge(_PID);
+            loadPendingReceipts(_PID);
+       
+            
+            if (typeof initSecurityMonitor === 'function') initSecurityMonitor();
+        }
+
+    } catch (err) { console.error(err); }
 });
 /************************************************
- * ۳. حسابداری (۳ صندوق: جاری، سرمایه، سود)
+ * تابع کمکی برای بررسی امنیت و حجم فایل‌ها
+ ************************************************/
+function validateAdminFile(file) {
+    const maxSize = 5 * 1024 * 1024; // ۵ مگابایت
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+    if (!file) return { valid: false, msg: "لطفاً ابتدا فایل را انتخاب کنید ❌" };
+    if (file.size > maxSize) return { valid: false, msg: "حجم فایل نباید بیشتر از ۵ مگابایت باشد ❌" };
+    if (!allowedTypes.includes(file.type)) return { valid: false, msg: "فقط عکس (JPG یا PNG) مجاز است ❌" };
+    
+    return { valid: true };
+}
+
+/************************************************
+ * تابع مرکزی حسابداری (مدیریت ۳ صندوق و دارایی کل)
  ************************************************/
 async function calculateStats(poolId) {
+    if (!poolId) return;
     try {
-        const { data: txs } = await supabaseClient
+        // فقط یک بار درخواست به دیتابیس شلیک می‌شود 👇
+        const { data: txs, error } = await supabaseClient
             .from('transactions')
-            .select('amount, type, invest_val, status')
+            .select('*')
             .eq('pool_id', poolId)
             .eq('status', 'approved');
 
-        if (txs) {
-            let totalIn = 0;            // واریزی اعضا
-            let totalOut = 0;           // پرداختی وام/برنده
-            let totalInvestTarget = 0;  // سهمیه‌های کسر شده برای سرمایه
-            let actualCapitalSpent = 0; // پول خرج شده برای خرید پروژه
-            let totalProfitIn = 0;      // سودهای دریافتی
-            let totalProfitDist = 0;    // سودهای تقسیم شده
+        if (error) throw error;
 
+        let totalIn = 0, totalOut = 0, totalInvestTarget = 0, actualCapitalSpent = 0, totalProfitIn = 0, totalProfitDist = 0;
+
+        if (txs) {
             txs.forEach(t => {
                 const val = Number(t.amount || 0);
                 const inv = Number(t.invest_val || 0);
@@ -189,455 +377,781 @@ async function calculateStats(poolId) {
                 else if (t.type === 'profit') totalProfitIn += val;
                 else if (t.type === 'distribution') totalProfitDist += val;
             });
-
-            const mainFund = (totalIn - totalInvestTarget) - totalOut; 
-            const investFund = totalInvestTarget - actualCapitalSpent;
-            const profitFund = totalProfitIn - totalProfitDist;
-
-            if(document.getElementById('main-fund-balance')) document.getElementById('main-fund-balance').innerText = Math.floor(mainFund).toLocaleString() + " تومان";
-            if(document.getElementById('invest-fund-balance')) document.getElementById('invest-fund-balance').innerText = Math.floor(investFund).toLocaleString();
-            if(document.getElementById('profit-fund-balance')) document.getElementById('profit-fund-balance').innerText = Math.floor(profitFund).toLocaleString();
-            
-            // نمایش دارایی کل در Master Balance
-            const totalAssets = mainFund + investFund + profitFund;
-            if(document.getElementById('master-total-assets')) document.getElementById('master-total-assets').innerText = Math.floor(totalAssets).toLocaleString() + " تومان";
         }
-    } catch (e) { console.error(e); }
+
+        const mainFund = (totalIn - totalInvestTarget) - totalOut;
+        const investFund = totalInvestTarget - actualCapitalSpent;
+        const profitFund = totalProfitIn - totalProfitDist;
+        const totalAssets = mainFund + investFund + profitFund;
+
+        // نمایش در UI
+        const updateUI = (id, val) => { if (document.getElementById(id)) document.getElementById(id).innerText = Math.floor(val).toLocaleString() + " تومان"; };
+        updateUI('master-total-assets', totalAssets);
+        updateUI('main-fund-balance', mainFund);
+        updateUI('invest-fund-balance', investFund);
+        updateUI('profit-fund-balance', profitFund);
+
+    } catch (e) { console.error("Stats Calc Error:", e.message); }
 }
 
+
 /************************************************
- * ۴. تایید فیش + سهم سرمایه + امتیاز خوش‌حسابی
+ * تابع تایید فیش - با منطق بازگشت به صف
  ************************************************/
 window.updateStatus = async function(id, newStatus) {
     const myPoolId = sessionStorage.getItem('pool_id');
+    
     try {
         if (newStatus === 'approved') {
-            const { data: tx } = await supabaseClient.from('transactions').select('*').eq('id', id).single();
-            const { data: set } = await supabaseClient.from('settings').select('investment_percent').eq('pool_id', myPoolId).maybeSingle();
+            // ۱. دریافت اطلاعات فیش
+            const { data: tx } = await supabaseClient
+                .from('transactions')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            const { data: set } = await supabaseClient
+                .from('settings')
+                .select('investment_percent')
+                .eq('pool_id', myPoolId)
+                .maybeSingle();
 
             const currentN = set ? Number(set.investment_percent || 0) : 0;
             const investAmount = Math.floor((Number(tx.amount) * currentN) / 100);
 
-            await supabaseClient.from('transactions').update({ status: 'approved', invest_val: investAmount }).eq('id', id);
+            // ۲. آپدیت وضعیت فیش
+            await supabaseClient.from('transactions').update({ 
+                status: 'approved', 
+                invest_val: investAmount 
+            }).eq('id', id);
 
             if (tx.member_id) {
+                // ۳. محاسبه وضعیت مالی عضو
+                const { data: allTxs } = await supabaseClient
+                    .from('transactions')
+                    .select('amount, type, category')
+                    .eq('member_id', tx.member_id)
+                    .eq('status', 'approved');
+
+                const totalIn = allTxs
+                    .filter(t => t.type === 'in')
+                    .reduce((s, a) => s + Number(a.amount), 0);
+
+                const totalOutMonthly = allTxs
+                    .filter(t => t.type === 'out' && t.category === 'monthly')
+                    .reduce((s, a) => s + Number(a.amount), 0);
+
+                // ۴. آپدیت نمره خوش‌حسابی
+                const { data: mem } = await supabaseClient
+                    .from('members')
+                    .select('*')
+                    .eq('id', tx.member_id)
+                    .single();
+
                 const day = new Date(tx.created_at).getDate();
-                const { data: mem } = await supabaseClient.from('members').select('credit_score').eq('id', tx.member_id).single();
                 let newScore = (Number(mem.credit_score) || 100) + (day <= 10 ? 2 : -10);
                 newScore = Math.max(0, Math.min(100, newScore));
-                await supabaseClient.from('members').update({ credit_score: newScore }).eq('id', tx.member_id);
+
+                // ۵. بررسی بازگشت به صف 👇
+                let memberUpdateData = { 
+                    credit_score: newScore,
+                    debt_warning_msg: null 
+                };
+
+                // 🔥 شرط: اگر بدهی نوبتی تسویه شد
+                if (totalIn >= totalOutMonthly) {
+                    // عضو واجد شرایط میشه و میره ته صف
+                    memberUpdateData.eligible_at = new Date().toISOString();
+                    console.log(`✅ ${mem.full_name} تسویه کرد و وارد صف شد.`);
+                }
+
+                // ۶. ثبت نهایی
+                await supabaseClient
+                    .from('members')
+                    .update(memberUpdateData)
+                    .eq('id', tx.member_id);
             }
         } else {
             await supabaseClient.from('transactions').update({ status: newStatus }).eq('id', id);
         }
-        alert("عملیات با موفقیت انجام شد ✅"); location.reload();
-    } catch (e) { alert("خطا در تایید"); }
+
+        await Swal.fire({
+            title: 'عملیات موفق',
+            text: 'تغییرات ثبت شد ✅',
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+
+        location.reload();
+
+    } catch (e) {
+        console.error("Critical Update Error:", e);
+        Swal.fire({ title: 'خطا در تایید', text: e.message, icon: 'error' });
+    }
 };
 
-async function loadPendingReceipts(poolId) {
-    const { data } = await supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'pending');
-    const container = document.getElementById('pending-list');
-    const badge = document.getElementById('pending-count');
-    if (data && container) {
-        container.innerHTML = data.map(t => `
-            <div class="bg-white p-4 rounded-[2rem] border flex items-center justify-between mb-3 shadow-sm">
-                <div class="flex gap-1.5">
-                    <button onclick="updateStatus(${t.id},'rejected')" class="w-9 h-9 bg-rose-50 text-rose-500 rounded-xl flex items-center justify-center"><i class="fas fa-times"></i></button>
-                    <button onclick="updateStatus(${t.id},'approved')" class="w-9 h-9 bg-emerald-50 text-emerald-500 rounded-xl flex items-center justify-center"><i class="fas fa-check"></i></button>
-                </div>
-                <div class="text-right flex-1 px-3">
-                    <p class="text-[10px] font-black text-slate-800">عضو کد: ${t.member_id}</p>
-                    <p class="text-[9px] text-slate-400">${Number(t.amount).toLocaleString()} ت</p>
-                </div>
-                <a href="${t.receipt_url}" target="_blank" class="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 border border-indigo-100 shadow-sm"><i class="fas fa-eye text-xs"></i></a>
-            </div>`).join('');
-        if(badge) badge.innerText = data.length;
-    }
-}
+
 
 /************************************************
- * ۵. مدیریت اعضا (لیست، گزارش، ویرایش)
+ * تابع ثبت ویرایش عضو (نسخه فوق‌امن و ضد کرش)
  ************************************************/
-async function loadAllMembers(poolId) {
+window.updateMember = async function() {
+    console.log("در حال تلاش برای ثبت ویرایش...");
+
+    // ۱. دسترسی به المان‌ها با احتیاط کامل 👇
+    const elId = document.getElementById('edit-member-id');
+    const elName = document.getElementById('edit-member-name');
+    const elMobile = document.getElementById('edit-member-mobile');
+    const elAddr = document.getElementById('edit-member-address');
+    const elShares = document.getElementById('edit-member-shares');
+    const elAdmin = document.getElementById('edit-member-is-admin');
+    const elPass = document.getElementById('edit-member-pass');
+    const btn = document.getElementById('edit-save-btn');
+
+    // ۲. بررسی حیاتی: اگر نام یا موبایل یا آیدی کلاً در صفحه نبودند
+    if (!elId || !elName || !elMobile) {
+        console.error("❌ برخی از المان‌های اصلی ویرایش در HTML پیدا نشدند!");
+        return Swal.fire({ text: "خطای سیستمی: فیلدهای ویرایش در صفحه یافت نشد!", icon: 'error' });
+    }
+
+    const memberId = elId.value;
+    const poolId = sessionStorage.getItem('pool_id');
+
+    // ۳. شروع لودینگ دکمه
+    toggleLoading('edit-save-btn', true, 'در حال بروزرسانی...');
+
     try {
-        const { data: members } = await supabaseClient.from('members').select('*').eq('pool_id', poolId).eq('is_admin', false).order('credit_score', { ascending: false });
-        const { data: txs } = await supabaseClient.from('transactions').select('member_id, amount, type').eq('pool_id', poolId).eq('status', 'approved');
-        allMembersData = members || [];
-        const container = document.getElementById('members-list');
-        if (!container) return;
+        // ۴. آماده‌سازی دیتای آپدیت (اگر المانی نبود، مقدار قبلی یا خالی بگذارد)
+        let updateData = {
+            full_name: elName.value.trim(),
+            mobile: elMobile.value.trim(),
+            address: elAddr ? elAddr.value.trim() : "",
+            total_shares: elShares ? parseInt(elShares.value) : 1,
+            is_admin: elAdmin ? elAdmin.checked : false
+        };
 
-        container.innerHTML = members.map(m => {
-            const userIn = txs ? txs.filter(t => t.member_id === m.id && t.type === 'in').reduce((s, a) => s + Number(a.amount), 0) : 0;
-            const adminBadge = m.is_admin ? `<span class="bg-amber-100 text-amber-600 text-[7px] px-1 py-0.5 rounded ml-1 font-black">مدیر</span>` : '';
-            
-            return `
-                <div class="bg-white p-4 rounded-[2rem] border border-slate-50 flex justify-between items-center mb-3 shadow-sm">
-                    <div class="text-right">
-                        <div class="flex items-center gap-1"><p class="text-[11px] font-black text-slate-800">${m.full_name}</p>${adminBadge}</div>
-                        <div class="flex items-center gap-2 mt-1">
-                            <span class="text-[8px] text-amber-500 font-black"><i class="fas fa-star text-[7px]"></i> ${m.credit_score || 100}%</span>
-                            <span class="text-[8px] text-emerald-600 font-black">واریزی: ${userIn.toLocaleString()} ت</span>
-                        </div>
-                    </div>
-                    <div class="flex gap-2">
-                        <button onclick="openReportModalById(${m.id})" class="w-10 h-10 bg-slate-900 text-white rounded-2xl flex items-center justify-center active:scale-90"><i class="fas fa-chart-line text-xs"></i></button>
-                        <button onclick="openEditModalById(${m.id})" class="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center active:scale-90"><i class="fas fa-edit text-xs"></i></button>
-                    </div>
-                </div>`;
-        }).join('');
-    } catch (e) { console.error(e); }
-}
+        // ۵. اگر رمز جدید وارد شده بود
+        if (elPass && elPass.value.length >= 6) {
+            updateData.password = await hashPassword(elPass.value);
+        }
 
-async function openReportModalById(id) {
-    const m = allMembersData.find(x => x.id === id);
-    if (!m) return;
-    selectedMemberForReport = m;
-    document.getElementById('rep-name').innerText = m.full_name;
-    document.getElementById('rep-mobile').innerText = m.mobile;
-    document.getElementById('rep-score').innerText = (m.credit_score || 100) + "%";
-    
-    const { data: txs } = await supabaseClient.from('transactions').select('amount, type').eq('member_id', m.id).eq('status', 'approved');
-    const tin = txs ? txs.filter(t => t.type === 'in').reduce((s, a) => s + Number(a.amount), 0) : 0;
-    const debt = Number(m.debt_target || 0);
-    const remain = Math.max(0, debt - tin);
-    const progress = debt > 0 ? Math.min(Math.floor((tin / debt) * 100), 100) : 0;
+        // ۶. عملیات در دیتابیس
+        const { error } = await supabaseClient
+            .from('members')
+            .update(updateData)
+            .eq('id', memberId);
 
-    document.getElementById('rep-total-in').innerText = tin.toLocaleString() + " ت";
-    document.getElementById('rep-total-out').innerText = debt.toLocaleString() + " ت";
-    document.getElementById('rep-balance').innerHTML = `<div class="space-y-2"><div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="bg-emerald-500 h-full" style="width:${progress}%"></div></div><p class="text-[10px] font-black text-rose-600 pt-1">${remain.toLocaleString()} تومان مانده بدهی</p></div>`;
-    document.getElementById('report-modal').classList.remove('hidden');
-}
+        if (error) throw error;
 
-async function updateMember() {
-    const id = document.getElementById('edit-member-id').value;
-    const newShares = parseInt(document.getElementById('edit-member-shares').value);
-    const myPoolId = sessionStorage.getItem('pool_id');
-    const newPass = document.getElementById('edit-member-pass').value;
+        // ۷. موفقیت
+        Swal.fire({
+            title: 'بروزرسانی موفق ✅',
+            text: `اطلاعات ${elName.value} با موفقیت تغییر یافت.`,
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false,
+            customClass: { popup: 'rounded-[2rem]' }
+        });
 
-    const { data: oldM } = await supabaseClient.from('members').select('total_shares').eq('id', id).single();
-    const { data: pool } = await supabaseClient.from('pools').select('member_capacity').eq('id', myPoolId).single();
-    const diff = newShares - oldM.total_shares;
+        // بستن مودال و رفرش لیست اعضا بدون رفرش کل صفحه
+        document.getElementById('edit-modal').classList.add('hidden');
+        loadAllMembers(poolId);
 
-    if (diff > pool.member_capacity) return alert("سهمیه کافی ندارید ❌");
-
-    let upData = { full_name: document.getElementById('edit-member-name').value, mobile: document.getElementById('edit-member-mobile').value, total_shares: newShares, is_admin: document.getElementById('edit-member-is-admin').checked };
-    if(newPass) upData.password = newPass;
-
-    await supabaseClient.from('members').update(upData).eq('id', id);
-    await supabaseClient.from('pools').update({ member_capacity: pool.member_capacity - diff }).eq('id', myPoolId);
-    alert("بروزرسانی شد ✅"); location.reload();
-}
-
-async function addNewMember() {
-    const poolId = sessionStorage.getItem('pool_id');
-    const n = document.getElementById('new-member-name').value, m = document.getElementById('new-member-mobile').value, p = document.getElementById('new-member-pass').value, s = parseInt(document.getElementById('new-member-shares').value) || 1, adm = document.getElementById('new-member-is-admin').checked;
-    
-    const { data: pool } = await supabaseClient.from('pools').select('member_capacity').eq('id', poolId).single();
-    if (pool.member_capacity < s) return alert("سهمیه کافی ندارید ❌");
-    if(!n || !m) return alert("اطلاعات ناقص است");
-
-    const { error } = await supabaseClient.from('members').insert([{ pool_id: poolId, full_name: n, mobile: m, password: p, total_shares: s, won_shares: 0, has_won: false, is_admin: adm, credit_score: 100 }]);
-    if(!error) {
-        await supabaseClient.from('pools').update({ member_capacity: pool.member_capacity - s }).eq('id', poolId);
-        alert("عضو ثبت شد ✅"); location.reload();
+    } catch (e) {
+        console.error("Update Error:", e);
+        Swal.fire({ title: 'خطا در ذخیره', text: e.message, icon: 'error' });
+    } finally {
+        toggleLoading('edit-save-btn', false, 'ذخیره تغییرات');
     }
-}
+};
 
-async function handleDeleteWithSettlement() {
-    const m = selectedMemberForReport;
-    const amt = Number(document.getElementById('settle-amount').value);
-    if (!confirm(`حذف نهایی "${m.full_name}"؟`)) return;
-    if (amt > 0) await supabaseClient.from('transactions').insert([{ pool_id: m.pool_id, amount: amt, status: 'approved', type: 'out', receipt_url: 'تسویه نهایی عضو' }]);
-    await supabaseClient.from('members').delete().eq('id', m.id);
-    alert("انجام شد ✅"); location.reload();
-}
+
 
 /************************************************
- * ۶. قرعه‌کشی و مدیریت وام
+ * تابع حذف ریشه‌ای عضو (Auth + Database)
  ************************************************/
-async function runLottery() {
-    const poolId = sessionStorage.getItem('pool_id');
-    const { data: members } = await supabaseClient.from('members').select('*').eq('pool_id', poolId);
-    let hat = [];
-    members.forEach(m => { for(let i=0; i< (m.total_shares - m.won_shares); i++) hat.push(m); });
-    if (hat.length === 0) return alert("همه سهم‌ها برنده شده‌اند!");
-    const winner = hat[Math.floor(Math.random() * hat.length)];
-    let amt = prompt(`🏆 برنده: ${winner.full_name}\nچه مبلغی کسر شود؟`, "80000000");
-    if (!amt) return;
+window.handleDeleteWithSettlement = async function() {
+    const m = selectedMemberForReport;
+    const balance = m.finalBalance || 0;
+    const settleAmt = document.getElementById('settle-amount').value;
 
-    await supabaseClient.from('lottery_results').insert([{ pool_id: poolId, winner_name: winner.full_name, month_name: 'دی' }]);
-    await supabaseClient.from('transactions').insert([{ pool_id: poolId, member_id: winner.id, amount: Number(amt), status: 'approved', type: 'out', receipt_url: 'پرداخت قرعه‌کشی' }]);
-    await supabaseClient.from('members').update({ won_shares: winner.won_shares + 1, has_won: (winner.won_shares + 1) >= winner.total_shares, debt_target: (Number(winner.debt_target) || 0) + Number(amt) }).eq('id', winner.id);
-    alert("اوکی شد ✅"); location.reload();
-}
+    if (!settleAmt) {
+        return Swal.fire({ text: "لطفاً مبلغ تسویه نهایی را وارد کنید (حتی عدد 0)", icon: 'warning' });
+    }
+
+    // پیام تایید هوشمند بر اساس تراز
+    let warningText = "";
+    if (balance > 0) warningText = `عضو مبلغ ${balance.toLocaleString()} ت پس‌انداز دارد. آیا مطمئنید که تسویه انجام شده و می‌خواهید او را حذف کنید؟`;
+    else if (balance < 0) warningText = `عضو مبلغ ${Math.abs(balance).toLocaleString()} ت بدهکار است. آیا تایید می‌کنید که این بدهی را وصول کرده‌اید؟`;
+    else warningText = `حساب عضو صفر است. آیا از حذف نهایی اطمینان دارید؟`;
+
+    const result = await Swal.fire({
+        title: 'تایید تسویه و حذف',
+        text: warningText,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        confirmButtonText: 'بله، تسویه شد و حذف کن',
+        cancelButtonText: 'انصراف'
+    });
+
+    if (result.isConfirmed) {
+        try {
+            Swal.fire({ title: 'در حال تسویه نهایی...', didOpen: () => Swal.showLoading() });
+
+            const poolId = sessionStorage.getItem('pool_id');
+
+            // ۱. ثبت تراکنش تسویه برای اصلاح موجودی کل صندوق 👇
+            // اگر بستانکار بود، از صندوق کم می‌شود. اگر بدهکار بود، به صندوق اضافه می‌شود.
+            if (Number(settleAmt) > 0) {
+                await supabaseClient.from('transactions').insert([{
+                    pool_id: poolId,
+                    amount: Number(settleAmt),
+                    status: 'approved',
+                    type: balance > 0 ? 'out' : 'in', // اگر پس‌اندازش را پس دادیم 'out'، اگر بدهی‌اش را گرفتیم 'in'
+                    receipt_url: `تسویه نهایی با عضو حذف شده: ${m.full_name}`
+                }]);
+            }
+
+            // ۲. حذف ریشه‌ای (Auth + Database) که قبلاً با RPC ساختیم
+            await supabaseClient.rpc('delete_user_from_auth', { target_user_id: m.id });
+            await supabaseClient.from('members').delete().eq('id', m.id);
+
+            await Swal.fire({ title: 'حذف و تسویه موفق ✅', text: 'حساب بسته شد و موجودی صندوق آپدیت گردید.', icon: 'success' });
+            
+            closeReportModal();
+            closeMemberProfile();
+            loadAllMembers(poolId);
+            calculateStats(poolId); // بروزرسانی موجودی کل پلتفرم
+
+        } catch (e) {
+            Swal.fire({ text: e.message, icon: 'error' });
+        }
+    }
+};
 
 /************************************************
- * نمایش لیست وام‌ها با درصد موافقت و دکمه رد
+ * نمایش لیست درخواست‌های مساعده اعضا (v15.0)
+ * متصل به تابع جدید payEmergencyLoan
  ************************************************/
 async function loadAdminLoans(poolId) {
-    try {
-        // ۱. گرفتن تعداد کل اعضای این صندوق برای محاسبه درصد
-        const { count: totalMembers } = await supabaseClient
-            .from('members')
-            .select('*', { count: 'exact', head: true })
-            .eq('pool_id', poolId)
-            .eq('is_admin', false);
+    const container = document.getElementById('admin-loans-list');
+    if (!container || !poolId) return;
 
-        // ۲. گرفتن لیست درخواست‌های وام
+    try {
+        // دریافت وام‌های در حال رای‌گیری
         const { data: loans, error } = await supabaseClient
             .from('loans')
             .select('*')
             .eq('pool_id', poolId)
+            .eq('status', 'voting')
             .order('created_at', { ascending: false });
 
-        const container = document.getElementById('admin-loans-list');
-        if (!container) return;
+        if (error) throw error;
 
-        if (error || !loans || loans.length === 0) {
-            container.innerHTML = '<p class="text-center text-[10px] text-slate-400 py-10 font-bold uppercase">درخواستی یافت نشد</p>';
+        if (!loans || loans.length === 0) {
+            container.innerHTML = '<p class="text-center py-5 text-slate-400 text-[10px]">درخواست مساعده‌ای موجود نیست.</p>';
             return;
         }
 
-        container.innerHTML = loans.map(l => {
-            const isPaid = l.status === 'paid';
-            
-            // ۳. محاسبه درصد موافقت (نسبت به کل اعضای صندوق)
-            const approvalRate = totalMembers > 0 ? Math.round((l.votes_up / totalMembers) * 100) : 0;
-            
-            // رنگ درصد بر اساس میزان محبوبیت
-            const rateColor = approvalRate >= 50 ? 'text-emerald-500' : 'text-orange-500';
+        container.innerHTML = loans.map(l => `
+            <div class="bg-slate-50 p-5 rounded-[2rem] border border-slate-100 mb-4 shadow-sm text-right">
+                <div class="flex justify-between items-start mb-3">
+                    <h5 class="text-xs font-black text-slate-800">${l.requester_name}</h5>
+                    <span class="text-[10px] font-black text-indigo-600">${Number(l.amount).toLocaleString()} ت</span>
+                </div>
+                
+                <p class="text-[9px] text-slate-500 leading-relaxed italic mb-4">"${l.description || 'بدون توضیح'}"</p>
+                
+                <div class="flex gap-2 mb-4">
+                    <span class="text-[8px] bg-emerald-50 text-emerald-600 px-2 py-1 rounded-lg">👍 ${l.votes_up || 0} موافق</span>
+                    <span class="text-[8px] bg-rose-50 text-rose-600 px-2 py-1 rounded-lg">👎 ${l.votes_down || 0} مخالف</span>
+                </div>
 
-            return `
-                <div class="bg-white p-5 rounded-[2.5rem] border border-slate-100 mb-4 shadow-sm text-right relative overflow-hidden">
-                    <div class="flex justify-between items-start mb-4">
-                        <div class="flex-1">
-                            <p class="text-[11px] font-[900] text-slate-800">${l.requester_name}</p>
-                            <p class="text-[10px] text-slate-500 font-bold">${Number(l.amount).toLocaleString()} تومان</p>
-                        </div>
-                        <!-- نمایش درصد موافقت نئونی 👇 -->
-                        <div class="text-left">
-                            <div class="bg-slate-50 px-3 py-1 rounded-xl border border-slate-100 flex flex-col items-center">
-                                <span class="text-[7px] text-slate-400 font-black uppercase">Approval</span>
-                                <span class="text-sm font-black ${rateColor}">${approvalRate}%</span>
-                            </div>
-                        </div>
-                    </div>
+                <div class="flex gap-2">
+                    <!-- 👇 اتصال به تابع جدید با پاس دادن UUID عضو -->
+                    <button onclick="payEmergencyLoan('${l.id}', ${l.amount}, '${l.requester_name}', '${l.member_id}')" 
+                            class="flex-1 bg-emerald-500 text-white py-3 rounded-2xl font-black text-[9px] shadow-lg active:scale-95">
+                        تایید و واریز مساعده
+                    </button>
+                    <button onclick="rejectLoan('${l.id}', '${l.requester_name}')" 
+                            class="px-4 bg-white text-rose-500 border border-rose-100 py-3 rounded-2xl font-black text-[9px] active:scale-95">
+                        رد
+                    </button>
+                </div>
+            </div>`).join('');
 
-                    <!-- نوار آمار ریز -->
-                    <div class="flex gap-4 mb-4 text-[9px] font-bold text-slate-400 border-b border-slate-50 pb-3">
-                        <span class="text-emerald-600"><i class="fas fa-thumbs-up ml-1"></i> ${l.votes_up || 0} موافق</span>
-                        <span class="text-rose-500"><i class="fas fa-thumbs-down ml-1"></i> ${l.votes_down || 0} مخالف</span>
-                    </div>
-
-                    <div class="flex gap-2">
-                        <!-- دکمه تایید و پرداخت -->
-                        <button onclick="payLoan(${l.id}, ${l.amount}, '${l.requester_name}')" 
-                                class="flex-[2] py-3.5 rounded-2xl font-black text-[10px] transition-all ${isPaid ? 'bg-slate-100 text-slate-400 pointer-events-none' : 'bg-indigo-600 text-white shadow-lg active:scale-95'}">
-                            ${isPaid ? 'واریز شده' : 'تایید و واریز وام'}
-                        </button>
-                        
-                        <!-- دکمه رد درخواست (جدید) 👇 -->
-                        ${!isPaid ? `
-                        <button onclick="rejectLoan(${l.id}, '${l.requester_name}')" 
-                                class="flex-1 bg-rose-50 text-rose-500 py-3.5 rounded-2xl font-black text-[10px] border border-rose-100 active:scale-95 transition-all">
-                            رد درخواست
-                        </button>` : ''}
-                    </div>
-                </div>`;
-        }).join('');
-    } catch (err) { console.error(err); }
+    } catch (e) { console.error("Error loading admin loans:", e); }
 }
 
 
-
+/************************************************
+ * ۷. مدیریت پروژه‌های سرمایه‌گذاری
+ ************************************************/
 
 /************************************************
- * تابع ریست کل دوره (شروع دوره جدید)
+ * تابع افتتاح پروژه جدید (v10.1 - رفع باگ عدم نمایش)
  ************************************************/
-window.resetLotterySeason = async function() {
-    // ۱. گرفتن آیدی صندوق از حافظه موقت (سشن)
-    const myPoolId = sessionStorage.getItem('pool_id');
-    
-    if (!myPoolId) {
-        alert("خطا: جلسه کاری شما منقضی شده. لطفا دوباره لاگین کنید.");
-        window.location.replace('index.html');
-        return;
+/************************************************
+ * تابع افتتاح پروژه (بدون سوال تکراری - مستقیم)
+ ************************************************/
+window.createNewProject = async function() {
+    const nameInput = document.getElementById('proj-name');
+    const capitalInput = document.getElementById('proj-capital'); // گرفتن کادر جدید
+    const poolId = sessionStorage.getItem('pool_id');
+
+    // ۱. بررسی پر بودن کادرها
+    if (!nameInput.value.trim() || !capitalInput.value) {
+        return Swal.fire({ text: "لطفاً نام و مبلغ سرمایه را وارد کنید ❌", icon: 'warning' });
     }
 
-    // ۲. تاییدیه اول از مدیر
-    const confirm1 = confirm("⚠️ هشدار جدی!\nآیا مطمئن هستید که می‌خواهید کل دوره را ریست کنید؟\nبا این کار وضعیت تمام برنده‌ها صفر شده و تاریخچه برنده‌های قبلی پاک می‌شود.");
-    if (!confirm1) return;
+    const projName = nameInput.value.trim();
+    const amount = Number(capitalInput.value);
 
-    // ۳. تاییدیه دوم (برای جلوگیری از کلیک تصادفی)
-    const confirm2 = confirm("این عملیات غیرقابل بازگشت است. آیا واقعاً ادامه می‌دهید؟");
-    if (!confirm2) return;
+    if (amount <= 0) return Swal.fire({ text: "مبلغ سرمایه باید بیشتر از صفر باشد", icon: 'error' });
+
+    // ۲. فقط یک تاییدیه نهایی (بدون فیلد ورودی تکراری) 👇
+    const confirmResult = await Swal.fire({
+        title: 'تایید نهایی پروژه',
+        html: `آیا از کسر مبلغ <b class="text-indigo-600">${amount.toLocaleString()} ت</b> از "صندوق سرمایه‌گذاری" بابت پروژه <b>"${projName}"</b> اطمینان دارید؟`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'بله، کسر شود و افتتاح کن',
+        cancelButtonText: 'انصراف',
+        confirmButtonColor: '#4f46e5',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+
+    if (!confirmResult.isConfirmed) return;
+
+    // نمایش لودینگ
+    Swal.fire({ title: 'در حال ثبت پرونده...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
     try {
-        console.log("در حال ریست کردن صندوق شماره: " + myPoolId);
+        // ۳. ثبت در جدول پروژه‌ها
+        const { error: pErr } = await supabaseClient
+            .from('projects')
+            .insert([{ 
+                pool_id: poolId, 
+                name: projName, 
+                invested_amount: amount, 
+                total_profit: 0 
+            }]);
 
-        // الف) صفر کردن وضعیت تمام اعضا در این صندوق
-        const { error: memError } = await supabaseClient
-            .from('members')
-            .update({ 
-                won_shares: 0, 
-                has_won: false, 
-                debt_target: 0 
-            })
-            .eq('pool_id', myPoolId);
+        if (pErr) throw pErr;
 
-        if (memError) throw memError;
-
-        // ب) پاک کردن تاریخچه برنده‌های قرعه‌کشی این صندوق
-        const { error: lotError } = await supabaseClient
-            .from('lottery_results')
-            .delete()
-            .eq('pool_id', myPoolId);
-
-        if (lotError) throw lotError;
-
-        // ج) ثبت یک تراکنش سیستمی برای سوابق (اختیاری)
-        await supabaseClient.from('transactions').insert([{
-            pool_id: myPoolId,
-            amount: 0,
+        // ۴. ثبت تراکنش کسر از صندوق سرمایه (Type: capital_spend) 👇
+        const { error: txErr } = await supabaseClient.from('transactions').insert([{
+            pool_id: poolId,
+            amount: amount,
             status: 'approved',
-            type: 'in',
-            receipt_url: 'دوره جدید شروع شد (ریست سیستم)'
+            type: 'capital_spend', 
+            receipt_url: `افتتاح پروژه: ${projName}`
         }]);
 
-        alert("صندوق با موفقیت ریست شد و آماده دوره جدید است! 🔄✨");
-        location.reload(); // رفرش صفحه برای اعمال تغییرات
+        if (txErr) throw txErr;
+
+        // ۵. پیروزی!
+        await Swal.fire({ 
+            title: 'عملیات موفق ✅', 
+            text: 'پروژه ثبت و مبلغ از موجودی سرمایه کسر گردید.', 
+            icon: 'success',
+            confirmButtonColor: '#10b981'
+        });
+
+        // پاکسازی کادرها و آپدیت لیست
+        nameInput.value = '';
+        capitalInput.value = '';
+        calculateStats(poolId); 
+        loadAdminProjects(poolId);
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا در ثبت', text: e.message, icon: 'error' });
+    }
+};
+
+
+  
+/************************************************
+ * تابع لود پروژه‌ها (رفع ارور t is not defined + تاریخ لاتین)
+ ************************************************/
+async function loadAdminProjects(poolId) {
+    if (!poolId) poolId = sessionStorage.getItem('pool_id');
+    const container = document.getElementById('admin-projects-list');
+    if (!container) return;
+
+    try {
+        const { data: list, error } = await supabaseClient
+            .from('projects')
+            .select('*')
+            .eq('pool_id', poolId)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        allProjectsDataCache = list || [];
+
+        if (!list || list.length === 0) {
+            container.innerHTML = `<p class="text-center py-10 text-slate-400 text-[10px]">پروژه‌ای یافت نشد.</p>`;
+            return;
+        }
+
+        container.innerHTML = list.map(project => {
+            const prf = Number(project.total_profit || 0);
+            const inv = Number(project.invested_amount || 1);
+            const rate = inv > 0 ? ((prf / inv) * 100).toFixed(1) : "0.0";
+            
+            // 👇 اصلاح تاریخ: تبدیل به فرمت لاتین (English Numbers)
+            const latinDate = new Date(project.created_at).toLocaleDateString('en-CA', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            });
+
+            return `
+                <div class="bg-white p-6 rounded-[2.5rem] border border-slate-100 mb-5 shadow-sm relative overflow-hidden transition-all active:shadow-md">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="text-right">
+                            <h4 class="text-sm font-[900] text-slate-800">${project.name}</h4>
+                            <!-- استفاده از latinDate که در بالا تعریف کردیم 👇 -->
+                            <p class="text-[9px] text-slate-400 mt-1 font-bold tracking-tighter">Date: ${latinDate}</p>
+                        </div>
+                        <div class="text-left flex flex-col items-end gap-2">
+                            <span class="px-2 py-1 rounded-lg text-[10px] font-black ${prf >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}">
+                                ${rate}%
+                            </span>
+                            <!-- دقت کن که اینجا از project.id استفاده شده نه t.id 👇 -->
+                            <button onclick="deleteProject('${project.id}', '${project.name}')" class="w-9 h-9 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center border border-rose-100 active:scale-90">
+                                <i class="fas fa-trash-alt text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-50 p-4 rounded-2xl flex justify-between items-center mb-5 shadow-inner border border-slate-100">
+                        <span class="text-[9px] font-bold text-slate-500">سود انباشته:</span>
+                        <span class="text-xs font-black text-emerald-600">${prf.toLocaleString()} تومان</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="registerProjectProfit('${project.id}', '${project.name}')" class="btn-tap bg-emerald-600 text-white py-3.5 rounded-2xl font-black text-[9px] shadow-lg shadow-emerald-100">ثبت سود</button>
+                        <button onclick="openProfitManager('${project.id}', '${project.name}', ${project.total_profit})" class="btn-tap bg-indigo-600 text-white py-3.5 rounded-2xl font-black text-[9px] shadow-lg shadow-indigo-100">مدیریت سود</button>
+                    </div>
+                    <button onclick="showProjectFullAnalysis('${project.id}')" class="w-full mt-3 bg-slate-900 text-white py-3 rounded-2xl font-black text-[10px] shadow-xl">تحلیل تخصصی</button>
+                </div>`;
+        }).join('');
 
     } catch (err) {
-        console.error("Reset Error:", err);
-        alert("خطا در ریست کردن دیتابیس: " + err.message);
+        console.error("Critical Load Error:", err.message);
+    }
+}
+/************************************************
+ * تابع ثبت سود جدید برای پروژه با استایل SweetAlert2
+ ************************************************/
+window.registerProjectProfit = async function(id, name) {
+    // ۱. باز کردن کادر ورودی شیک برای دریافت مبلغ سود
+    const { value: profitAmt } = await Swal.fire({
+        title: 'ثبت سود حاصله',
+        html: `<p style="font-size:12px; color:#64748b;">میزان سود دریافتی از پروژه <b>"${name}"</b> را وارد کنید:</p>`,
+        icon: 'success',
+        input: 'number',
+        inputPlaceholder: 'مبلغ سود (تومان)',
+        showCancelButton: true,
+        confirmButtonText: 'ثبت در صندوق سود',
+        cancelButtonText: 'انصراف',
+        confirmButtonColor: '#10b981', // سبز
+        customClass: {
+            popup: 'rounded-[2.5rem]',
+            input: 'text-center font-black text-lg'
+        },
+        inputValidator: (value) => {
+            if (!value || value <= 0) {
+                return 'لطفاً مبلغ معتبری وارد کنید! ❌';
+            }
+        }
+    });
+
+    // اگر مدیر انصراف داد
+    if (!profitAmt) return;
+
+    try {
+        const poolId = sessionStorage.getItem('pool_id');
+        
+        // نمایش لودینگ حین ثبت در دیتابیس
+        Swal.showLoading();
+
+        // ۲. ثبت تراکنش از نوع profit (فقط تراز صندوق سود را بالا می‌برد)
+        const { error: txErr } = await supabaseClient.from('transactions').insert([{
+            pool_id: poolId,
+            amount: Number(profitAmt),
+            status: 'approved',
+            type: 'profit', // نوع مخصوص صندوق سود
+            receipt_url: `سود حاصله پروژه: ${name}`
+        }]);
+
+        if (txErr) throw txErr;
+
+        // ۳. بروزرسانی "سود کل" در پرونده خود پروژه
+        const { data: proj } = await supabaseClient.from('projects').select('total_profit').eq('id', id).single();
+        const { error: prErr } = await supabaseClient.from('projects').update({ 
+            total_profit: Number(proj.total_profit || 0) + Number(profitAmt) 
+        }).eq('id', id);
+
+        if (prErr) throw prErr;
+
+        // ۴. پیام موفقیت نهایی
+        await Swal.fire({
+            title: 'ثبت شد ✅',
+            text: `مبلغ ${Number(profitAmt).toLocaleString()} تومان به صندوق سود اضافه گردید.`,
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2rem]' }
+        });
+
+        // رفرش آمار و لیست پروژه‌ها
+        if (typeof calculateStats === 'function') calculateStats(poolId);
+        if (typeof loadAdminProjects === 'function') loadAdminProjects(poolId);
+
+    } catch (e) {
+        Swal.fire({
+            title: 'خطا در ثبت',
+            text: e.message,
+            icon: 'error',
+            confirmButtonColor: '#ef4444',
+            customClass: { popup: 'rounded-[2rem]' }
+        });
     }
 };
 
 
 
-async function payLoan(id, amt, name) {
-    let finalPay = prompt(`مبلغ واریزی برای وام ${name}؟ (از گاوصندوق کسر می‌شود)`, amt);
-    if (!finalPay) return;
-    const poolId = sessionStorage.getItem('pool_id');
-    await supabaseClient.from('transactions').insert([{ pool_id: poolId, member_id: null, amount: Number(finalPay), status: 'approved', type: 'out', receipt_url: `وام: ${name}` }]);
-    await supabaseClient.from('loans').update({ status: 'paid' }).eq('id', id);
-    const { data: m } = await supabaseClient.from('members').select('debt_target').eq('full_name', name).maybeSingle();
-    await supabaseClient.from('members').update({ debt_target: (Number(m?.debt_target) || 0) + Number(finalPay) }).eq('full_name', name);
-    alert("وام پرداخت و کسر شد ✅"); location.reload();
-}
-
 /************************************************
- * ۷. مدیریت پروژه‌های سرمایه‌گذاری
+ * تابع توزیع سود بین اعضا (بر اساس تعداد سهم)
  ************************************************/
-async function createNewProject() {
-    const n = document.getElementById('proj-name').value, c = document.getElementById('proj-capital').value, poolId = sessionStorage.getItem('pool_id');
-    if(!n || !c) return alert("نام و سرمایه الزامی است");
-    await supabaseClient.from('transactions').insert([{ pool_id: poolId, amount: Number(c), status: 'approved', type: 'capital_spend', receipt_url: `خرید دارایی: ${n}` }]);
-    await supabaseClient.from('projects').insert([{ pool_id: poolId, name: n, target_amount: Number(c), invested_amount: Number(c), status: 'active' }]);
-    alert("پروژه افتتاح شد 🏗️"); location.reload();
-}
+async function distributeProfitToMembers(poolId, amount, description) {
+    try {
+        // ۱. دریافت لیست اعضا و مجموع سهام
+        const { data: members } = await supabaseClient
+            .from('members')
+            .select('id, total_shares')
+            .eq('pool_id', poolId)
+            .eq('is_admin', false);
 
-async function loadAdminProjects(poolId) {
-    const { data: projs } = await supabaseClient.from('projects').select('*').eq('pool_id', poolId).order('created_at', {ascending: false});
-    const container = document.getElementById('admin-projects-list');
-    if (container && projs) {
-        container.innerHTML = projs.map(p => {
-            const roi = (((p.total_profit || 0) / (p.invested_amount || 1)) * 100).toFixed(1);
-            return `<div class="bg-white p-5 rounded-[2.5rem] border border-slate-100 mb-4 shadow-sm text-right">
-                <div class="flex justify-between items-start mb-3">
-                    <div><h4 class="text-xs font-black">${p.name}</h4><p class="text-[8px] text-slate-400 uppercase">سرمایه: ${Number(p.invested_amount).toLocaleString()} ت</p></div>
-                    <div class="text-left"><span class="px-2 py-0.5 rounded text-[9px] font-black ${p.total_profit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}">${roi}% بازدهی</span><button onclick="deleteProject(${p.id}, '${p.name}')" class="block mt-2 w-8 h-8 bg-rose-50 text-rose-600 rounded-xl mx-auto"><i class="fas fa-trash-alt text-[10px]"></i></button></div>
-                </div>
-                <div class="flex gap-2">
-                    <button onclick="registerProjectProfit(${p.id}, '${p.name}')" class="flex-1 bg-emerald-600 text-white py-3 rounded-2xl font-black text-[9px]">ثبت سود</button>
-                    <button onclick="openProfitManager(${p.id}, '${p.name}', ${p.total_profit || 0})" class="flex-1 bg-indigo-600 text-white py-3 rounded-2xl font-black text-[9px]">مدیریت سود</button>
-                </div>
-            </div>`;
-        }).join('');
+        if (!members || members.length === 0) {
+            console.log("عضویی برای توزیع سود یافت نشد");
+            return;
+        }
+
+        // ۲. محاسبه مجموع سهام کل
+        const totalShares = members.reduce((sum, m) => sum + (m.total_shares || 1), 0);
+
+        // ۳. توزیع به نسبت سهم هر عضو
+        const transactions = members.map(m => {
+            const memberShares = m.total_shares || 1;
+            const memberProfit = Math.floor((amount * memberShares) / totalShares);
+            
+            return {
+                pool_id: poolId,
+                member_id: m.id,
+                amount: memberProfit,
+                status: 'approved',
+                type: 'in',
+                receipt_url: description || 'سود پروژه'
+            };
+        });
+
+        // ۴. ثبت یکجای تمام تراکنش‌ها
+        const { error } = await supabaseClient
+            .from('transactions')
+            .insert(transactions);
+
+        if (error) throw error;
+
+        console.log(`✅ سود ${amount.toLocaleString()} ت بین ${members.length} عضو تقسیم شد.`);
+
+    } catch (e) {
+        console.error("خطا در توزیع سود:", e.message);
+        throw e;
     }
 }
 
-async function registerProjectProfit(id, name) {
-    let prof = prompt(`سود دریافتی از پروژه "${name}"؟`); if (!prof) return;
+window.executeProfitAction = async function(actionType) {
     const poolId = sessionStorage.getItem('pool_id');
-    await supabaseClient.from('transactions').insert([{ pool_id: poolId, amount: Number(prof), status: 'approved', type: 'profit', receipt_url: `سود حاصله: ${name}` }]);
-    const { data: p } = await supabaseClient.from('projects').select('total_profit').eq('id', id).single();
-    await supabaseClient.from('projects').update({ total_profit: (p.total_profit || 0) + Number(prof) }).eq('id', id);
-    alert("سود ثبت شد"); location.reload();
-}
+    const projId = document.getElementById('pm-proj-id').value;
+    const availableProfit = Number(document.getElementById('pm-available-profit').value);
 
-async function executeProfitAction(type) {
-    const pId = sessionStorage.getItem('pool_id'), prId = document.getElementById('pm-proj-id').value, amt = Number(document.getElementById('pm-available-profit').value);
-    if (type === 'distribute') {
-        const { data: ms } = await supabaseClient.from('members').select('id, total_shares').eq('pool_id', pId);
-        const totS = ms.reduce((s, m) => s + (m.total_shares || 1), 0), pps = amt / totS;
-        for (const m of ms) { await supabaseClient.from('transactions').insert([{ pool_id: pId, member_id: m.id, amount: Math.floor(pps * m.total_shares), status: 'approved', type: 'in', receipt_url: 'توزیع سود پروژه' }]); }
-        await supabaseClient.from('transactions').insert([{ pool_id: pId, amount: amt, status: 'approved', type: 'distribution', receipt_url: 'خروج سود' }]);
-    } else if (type === 'reinvest') {
-        await supabaseClient.from('transactions').insert([{ pool_id: pId, amount: amt, status: 'approved', type: 'distribution', receipt_url: 'سود به سرمایه' }]);
-        await supabaseClient.from('transactions').insert([{ pool_id: pId, amount: 0, invest_val: amt, status: 'approved', type: 'in', receipt_url: 'افزایش سرمایه' }]);
-    }
-    await supabaseClient.from('projects').update({ total_profit: 0 }).eq('id', prId);
-    alert("انجام شد"); location.reload();
-}
+    if (availableProfit <= 0) return Swal.fire({text: "سودی برای مدیریت وجود ندارد!", icon: 'warning'});
 
-/************************************************
- * ۸. تنظیمات، امنیت و PWA
- ************************************************/
-async function saveNewAmounts() {
-    const pId = sessionStorage.getItem('pool_id');
-    const b = document.getElementById('set-base-amount').value, w = document.getElementById('set-won-amount').value, i = document.getElementById('set-invest-percent').value;
-    await supabaseClient.from('settings').update({ base_amount: Number(b), won_amount: Number(w), investment_percent: Number(i) }).eq('pool_id', pId);
-    alert("ذخیره شد ✅");
-}
+    let finalAmt = 0;
+    let labelText = "";
 
-async function loadCurrentConfig(poolId) {
-    const { data } = await supabaseClient.from('settings').select('*').eq('pool_id', poolId).maybeSingle();
-    if (data) { document.getElementById('set-base-amount').value = data.base_amount; document.getElementById('set-won-amount').value = data.won_amount; document.getElementById('set-invest-percent').value = data.investment_percent || 0; }
-}
-
-async function injectSuperAdminButton(userId) {
-    // ۱. بررسی کلید مخفی دستگاه و وضعیت سوپر ادمین از هر دو حافظه
-    const hasDeviceKey = localStorage.getItem('master_access_key') === 'Idris_Master_Admin_X';
-    const isSuper = sessionStorage.getItem('is_super_admin') === 'true' || localStorage.getItem('is_super_admin') === 'true';
-
-    if (hasDeviceKey && isSuper && supabaseClient) {
-        try {
-            // ۲. استعلام نهایی از دیتابیس برای امنیت ۱۰۰٪
-            const { data: user } = await supabaseClient
-                .from('members')
-                .select('is_super_admin')
-                .eq('id', userId)
-                .maybeSingle();
-
-            if (user && user.is_super_admin === true) {
-                // ۳. اگر دکمه از قبل بود حذفش کن تا تکراری نشود
-                const oldBtn = document.getElementById('super-btn');
-                if (oldBtn) oldBtn.remove();
-
-                // ۴. ساخت دکمه طلایی جدید
-                const superBtn = document.createElement('button');
-                superBtn.id = "super-btn";
-                superBtn.innerHTML = `<i class="fas fa-crown ml-2"></i> ورود به ستاد فرماندهی`;
-                superBtn.className = "btn-tap w-full bg-yellow-500 text-slate-900 py-4 rounded-2xl font-black text-sm shadow-xl mt-4 flex items-center justify-center gap-2";
-                
-                superBtn.onclick = () => { window.location.href = 'super_admin.html'; };
-
-                // ۵. پیدا کردن محل تزریق (کارت گرادینت پیشخوان)
-                const container = document.querySelector('.admin-card-gradient');
-                if (container) {
-                    container.appendChild(superBtn);
-                    console.log("👑 دکمه ستاد فرماندهی با موفقیت تزریق شد.");
-                }
+    // ۱. تعیین مبلغ بر اساس نوع دکمه 👇
+    if (actionType === 'distribute') {
+        finalAmt = availableProfit;
+        labelText = "توزیع ۱۰۰٪ سود";
+    } else if (actionType === 'reinvest') {
+        finalAmt = availableProfit;
+        labelText = "انتقال ۱۰۰٪ سود به سرمایه";
+    } else if (actionType === 'split') {
+        finalAmt = availableProfit; // کل مبلغ پردازش می‌شود اما ۵۰/۵۰ تقسیم می‌شود
+        labelText = "توزیع ترکیبی ۵۰/۵۰";
+    } else if (actionType === 'custom') {
+        // --- حالت جدید: دریافت مبلغ دلخواه از مدیر ---
+        const { value: customAmt } = await Swal.fire({
+            title: 'مبلغ توزیع را وارد کنید',
+            input: 'number',
+            inputLabel: `حداکثر مبلغ قابل توزیع: ${availableProfit.toLocaleString()} تومان`,
+            inputPlaceholder: 'مبلغ به تومان...',
+            showCancelButton: true,
+            confirmButtonColor: '#fbbf24',
+            customClass: { popup: 'rounded-[2.5rem]' },
+            inputValidator: (value) => {
+                if (!value || value <= 0) return 'لطفاً مبلغ معتبری وارد کنید!';
+                if (value > availableProfit) return 'مبلغ وارد شده بیشتر از سود موجود است!';
             }
-        } catch (e) { console.log("Super button injection failed"); }
+        });
+        if (!customAmt) return;
+        finalAmt = Number(customAmt);
+        labelText = "توزیع مبلغ دلخواه بین اعضا";
+    }
+
+    try {
+        Swal.fire({ title: 'در حال پردازش تراکنش...', didOpen: () => Swal.showLoading() });
+
+        if (actionType === 'distribute' || actionType === 'custom') {
+            // توزیع کل یا بخشی از مبلغ بین اعضا
+            await distributeProfitToMembers(poolId, finalAmt, labelText);
+            await supabaseClient.from('transactions').insert([{ pool_id: poolId, amount: finalAmt, status: 'approved', type: 'distribution', receipt_url: labelText }]);
+
+        } else if (actionType === 'reinvest') {
+            // انتقال به سرمایه
+            await supabaseClient.from('transactions').insert([{ pool_id: poolId, amount: finalAmt, status: 'approved', type: 'distribution', receipt_url: labelText }]);
+            await supabaseClient.from('transactions').insert([{ pool_id: poolId, amount: 0, invest_val: finalAmt, status: 'approved', type: 'in', receipt_url: 'افزایش سرمایه از سود' }]);
+
+        } else if (actionType === 'split') {
+            const half = Math.floor(finalAmt / 2);
+            await distributeProfitToMembers(poolId, half, "۵۰٪ سود پروژه");
+            await supabaseClient.from('transactions').insert([{ pool_id: poolId, amount: finalAmt, status: 'approved', type: 'distribution', receipt_url: labelText }]);
+            await supabaseClient.from('transactions').insert([{ pool_id: poolId, amount: 0, invest_val: half, status: 'approved', type: 'in', receipt_url: '۵۰٪ سود سهم سرمایه' }]);
+        }
+
+        // کسر مبلغ پردازش شده از پرونده پروژه
+        const { data: proj } = await supabaseClient.from('projects').select('total_profit').eq('id', projId).single();
+        await supabaseClient.from('projects').update({ total_profit: Math.max(0, Number(proj.total_profit) - finalAmt) }).eq('id', projId);
+
+        await Swal.fire({ title: 'عملیات موفقیت‌آمیز ✅', text: 'حسابداری پروژه و صندوق‌ها بروزرسانی شد.', icon: 'success' });
+        
+        document.getElementById('profit-manager-modal').classList.add('hidden');
+        calculateStats(poolId);
+        loadAdminProjects(poolId);
+
+    } catch (e) {
+        Swal.fire({ text: e.message, icon: 'error' });
+    }
+};
+
+/************************************************
+ * تابع ذخیره تمامی تنظیمات (نسخه اصلاح شده)
+ ************************************************/
+window.saveNewAmounts = async function() {
+    const poolId = sessionStorage.getItem('pool_id');
+    const btn = document.getElementById('save-settings-btn');
+    
+    // گرفتن مقادیر
+    const b = document.getElementById('set-base-amount').value;
+    const w = document.getElementById('set-won-amount').value;
+    const n = document.getElementById('set-invest-percent').value;
+    const card = document.getElementById('set-manager-card').value;
+    const cardName = document.getElementById('set-manager-card-name').value;
+    const mob = document.getElementById('set-manager-mobile').value;
+
+    if (!poolId) return;
+
+    toggleLoading('save-settings-btn', true, 'در حال ثبت...');
+
+    try {
+        // ۱. آپدیت جدول تنظیمات
+        await supabaseClient.from('settings').update({ 
+            base_amount: Number(b), 
+            won_amount: Number(w), 
+            investment_percent: Number(n) 
+        }).eq('pool_id', poolId);
+
+        // ۲. آپدیت جدول صندوق (کارت و موبایل)
+        await supabaseClient.from('pools').update({ 
+            manager_card: card,
+            manager_card_name: cardName,
+            manager_mobile: mob
+        }).eq('id', poolId);
+
+        Swal.fire({
+            title: 'بروزرسانی موفق ✅',
+            text: 'تمامی تنظیمات با موفقیت در قلب دیتابیس ثبت شد.',
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+
+        calculateStats(poolId); // آپدیت آنی مبالغ در صفحه خانه
+
+    } catch (e) {
+        Swal.fire({ text: "خطا در ثبت: " + e.message, icon: 'error' });
+    } finally {
+        toggleLoading('save-settings-btn', false, 'ذخیره نهایی تنظیمات');
+    }
+};
+
+/************************************************
+ * تابع لود کردن تنظیمات صندوق و شماره کارت مدیر
+ ************************************************/
+/************************************************
+ * تابع لود تنظیمات (نسخه فوق‌امن و ضد کرش)
+ ************************************************/
+async function loadCurrentConfig(poolId) {
+    if (!poolId) return;
+    console.log("🛠 در حال لود ایمن تنظیمات...");
+
+    try {
+        // ۱. دریافت مبالغ اقساط از جدول settings
+        const { data: settings } = await supabaseClient
+            .from('settings')
+            .select('*')
+            .eq('pool_id', poolId)
+            .maybeSingle();
+
+        if (settings) { 
+            const baseInput = document.getElementById('set-base-amount');
+            const wonInput = document.getElementById('set-won-amount');
+            const investInput = document.getElementById('set-invest-percent');
+
+            // فقط اگر المان در صفحه وجود داشت، مقداردهی کن 👇
+            if (baseInput) baseInput.value = settings.base_amount || 0; 
+            if (wonInput) wonInput.value = settings.won_amount || 0; 
+            if (investInput) investInput.value = settings.investment_percent || 0;
+        }
+
+        // ۲. دریافت اطلاعات کارت و موبایل از جدول pools
+        const { data: pool } = await supabaseClient
+            .from('pools')
+            .select('manager_card, manager_card_name, manager_mobile')
+            .eq('id', poolId)
+            .single();
+
+        if (pool) {
+            const cardInput = document.getElementById('set-manager-card');
+            const cardNameInput = document.getElementById('set-manager-card-name');
+            const mobileInput = document.getElementById('set-manager-mobile');
+
+            if (cardInput) cardInput.value = pool.manager_card || "";
+            if (cardNameInput) cardNameInput.value = pool.manager_card_name || "";
+            if (mobileInput) mobileInput.value = pool.manager_mobile || "";
+            
+            console.log("✅ اطلاعات مدیر با موفقیت لود شد.");
+        }
+    } catch (e) { 
+        console.warn("⚠️ هشدار: برخی از فیلدهای تنظیمات در این صفحه یافت نشدند، اما برنامه به کار خود ادامه می‌دهد."); 
     }
 }
-function initSecretClick() {
-    let c = 0; const icon = document.querySelector('header i.fa-user-shield');
-    if (icon) icon.parentElement.onclick = () => { c++; if (c === 10) { const k = localStorage.getItem('master_access_key'); if(k) localStorage.removeItem('master_access_key'); else localStorage.setItem('master_access_key', 'Idris_Master_Admin_X'); location.reload(); } };
-}
-
 /************************************************
  * تابع تولید و دانلود گزارش اکسل (نهایی)
  ************************************************/
@@ -706,74 +1220,165 @@ window.exportTransactionsToExcel = async function() {
     }
 };
 // توابع مودال‌ها
-function openProfitManager(id, name, profit) { document.getElementById('pm-proj-id').value = id; document.getElementById('pm-available-profit').value = profit; document.getElementById('pm-info-text').innerText = `پروژه: ${name} | سود: ${profit.toLocaleString()} ت`; document.getElementById('profit-manager-modal').classList.remove('hidden'); }
-async function deleteProject(id, name) { if(confirm(`حذف "${name}"؟`)) { await supabaseClient.from('projects').delete().eq('id', id); location.reload(); } }
+/************************************************
+ * تابع باز کردن پنجره مدیریت سود (ضد ارور)
+ ************************************************/
+window.openProfitManager = function(id, name, profit) {
+    const modal = document.getElementById('profit-manager-modal');
+    const idInput = document.getElementById('pm-proj-id');
+    const profitInput = document.getElementById('pm-available-profit');
+    const infoText = document.getElementById('pm-info-text');
+
+    // لایه محافظتی برای جلوگیری از ارور Null 👇
+    if (!modal || !idInput || !profitInput) {
+        console.error("❌ خطای بحرانی: المان‌های مودال مدیریت سود در HTML یافت نشدند!");
+        return Swal.fire({ text: "خطای سیستمی: مودال مدیریت سود در صفحه نیست", icon: "error" });
+    }
+
+    // ۱. مقداردهی به فیلدها
+    idInput.value = id;
+    profitInput.value = profit;
+    if (infoText) infoText.innerText = `پروژه: ${name} | سود انباشته: ${Number(profit).toLocaleString()} تومان`;
+
+    // ۲. نمایش پنجره
+    modal.classList.remove('hidden');
+};
+/************************************************
+ * تابع حذف کامل یک پروژه (نسخه شیک و نهایی)
+ ************************************************/
+async function deleteProject(id, name) {
+    // ۱. نمایش سوال تایید حذف با استایل شیک
+    const result = await Swal.fire({
+        title: 'حذف پروژه سرمایه‌گذاری',
+        text: `آیا از حذف کامل پروژه "${name}" مطمئن هستید؟ تمام پرونده و آمارهای این پروژه پاک خواهد شد.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444', // قرمز برای حذف
+        cancelButtonColor: '#64748b',  // خاکستری
+        confirmButtonText: 'بله، حذف شود',
+        cancelButtonText: 'انصراف',
+        customClass: {
+            popup: 'rounded-[2rem]'
+        }
+    });
+
+    // ۲. اگر مدیر دکمه "بله" را زد:
+    if (result.isConfirmed) {
+        try {
+            // ۳. اجرای دستور حذف در دیتابیس
+            const { error } = await supabaseClient
+                .from('projects')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+
+            // ۴. نمایش پیام موفقیت و رفرش صفحه
+            await Swal.fire({
+                title: 'عملیات موفق',
+                text: `پروژه "${name}" با موفقیت حذف گردید 🗑️`,
+                icon: 'success',
+                confirmButtonText: 'تایید',
+                confirmButtonColor: '#10b981',
+                customClass: { popup: 'rounded-[2rem]' }
+            });
+
+            location.reload();
+
+        } catch (e) {
+            // نمایش خطا اگر مشکلی پیش آمد
+            Swal.fire({
+                title: 'خطا',
+                text: 'مشکلی در حذف پروژه رخ داد: ' + e.message,
+                icon: 'error',
+                confirmButtonColor: '#ef4444',
+                customClass: { popup: 'rounded-[2rem]' }
+            });
+        }
+    }
+}
+
+
+
 
 
 /************************************************
- * تابع نمایش صفحه مسدودی با درِ پشتی برای مدیر کل
+ * تابع نمایش صفحه مسدودی با مشخصات کامل صاحب حساب
  ************************************************/
-/************************************************
- * تابع نمایش صفحه مسدودی + دکمه تمدید هوشمند
- ************************************************/
-function showLockPage() {
+async function showLockPage() {
     const isSuper = sessionStorage.getItem('is_super_admin') === 'true';
     const hasMasterKey = localStorage.getItem('master_access_key') === 'Idris_Master_Admin_X';
     const myPoolId = sessionStorage.getItem('pool_id');
 
-    // ۱. طراحی بدنه اصلی صفحه مسدودی
+    // ۱. دریافت مشخصات کارت و نام از دیتابیس
+    let cardInfo = { num: '---', name: '---' };
+    try {
+        const { data } = await supabaseClient.from('global_config').select('master_card, master_card_name').eq('id', 1).maybeSingle();
+        if (data) {
+            cardInfo.num = data.master_card || '---';
+            cardInfo.name = data.master_card_name || '---';
+        }
+    } catch (e) { console.error("Database Error"); }
+
+    // ۲. طراحی بدنه صفحه
     document.body.innerHTML = `
         <div id="lock-screen-container" style="height:100vh; background:#020617; color:white; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:30px; font-family:Vazirmatn; direction:rtl;">
             
             <div style="position:relative; cursor:pointer;" id="secret-lock-zone">
-                <i class="fas fa-shield-alt" style="font-size:70px; color:#ef4444; margin-bottom:20px; filter: drop-shadow(0 0 15px rgba(239,68,68,0.3));"></i>
-                <div style="position:absolute; top:0; right:0; width:12px; height:12px; background:#fbbf24; border-radius:50%; display:${isSuper ? 'block' : 'none'}"></div>
+                <i class="fas fa-shield-alt" style="font-size:70px; color:#ef4444; margin-bottom:20px; filter: drop-shadow(0 0 15px rgba(239,68,68,0.2));"></i>
             </div>
 
-            <h2 style="font-[900]; font-size:24px;">دسترسی محدود شد</h2>
-            <p style="color:#64748b; font-size:13px; margin-top:10px; line-height:1.7;">
-                اعتبار زمانی این صندوق به اتمام رسیده است.<br>
-                برای فعال‌سازی مجدد، لطفاً نسبت به تمدید اشتراک اقدام کنید.
-            </p>
+            <h2 style="font-weight:900; font-size:24px;">دسترسی محدود شد</h2>
+            <p style="color:#64748b; font-size:13px; margin-top:10px;">اعتبار زمانی یا سهمیه این صندوق به اتمام رسیده است.</p>
 
-            <!-- دکمه پرداخت و تمدید برای مدیر صندوق -->
-            <button onclick="openBlockedPaymentModal()" style="margin-top:30px; background:#4f46e5; color:white; padding:16px 40px; border-radius:22px; font-weight:900; border:none; box-shadow: 0 10px 25px rgba(79,70,229,0.4); font-family:Vazirmatn; cursor:pointer; width:100%; max-width:280px;">
-                <i class="fas fa-credit-card" style="margin-left:8px;"></i> تمدید اشتراک و رفع مسدودی
+            <button onclick="openBlockedPaymentModal()" style="margin-top:30px; background:#4f46e5; color:white; padding:16px 40px; border-radius:22px; font-weight:900; border:none; width:100%; max-width:280px; cursor:pointer; box-shadow:0 10px 20px rgba(79,70,229,0.3);">
+                <i class="fas fa-redo ml-2"></i> تمدید اشتراک و رفع مسدودی
             </button>
 
-            <!-- دکمه ورود اضطراری (مخصوص شما) -->
-            ${(isSuper && hasMasterKey) ? `
-            <button onclick="window.location.href='super_admin.html'" style="margin-top:15px; background:none; color:#fbbf24; padding:12px; border:1px solid #fbbf24; border-radius:18px; font-weight:bold; font-family:Vazirmatn; cursor:pointer; width:100%; max-width:280px; font-size:11px;">
-                ورود به ستاد فرماندهی (ادیسون)
-            </button>` : ''}
+            ${(isSuper && hasMasterKey) ? `<button onclick="window.location.href='super_admin.html'" style="margin-top:15px; background:none; color:#fbbf24; padding:12px; border:1px solid #fbbf24; border-radius:18px; font-weight:bold; width:100%; max-width:280px; font-size:11px; cursor:pointer;">ورود به ستاد فرماندهی</button>` : ''}
 
-            <button onclick="sessionStorage.clear(); location.href='index.html'" style="margin-top:40px; color:#475569; background:none; border:none; font-size:12px; font-weight:bold; text-decoration:underline; cursor:pointer;">خروج از حساب</button>
+            <button onclick="handleLogout()" style="margin-top:40px; color:#475569; background:none; border:none; font-size:12px; font-weight:bold; text-decoration:underline; cursor:pointer;">خروج از حساب</button>
 
-            <!-- مودال مخفی پرداخت (Injected Modal) -->
+            <!-- مودال پرداخت در زمان مسدودی -->
             <div id="blocked-pay-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.9); backdrop-filter:blur(10px); z-index:2000; align-items:center; justify-content:center; padding:20px;">
                 <div style="background:#1e293b; width:100%; max-width:340px; padding:30px; border-radius:35px; border:1px solid #334155; box-shadow:0 25px 50px rgba(0,0,0,0.5);">
                     <h3 style="font-weight:900; font-size:18px; margin-bottom:10px;">ارسال فیش تمدید</h3>
-                    <p style="font-size:11px; color:#94a3b8; margin-bottom:20px;">مبلغ اشتراک را واریز کرده و تصویر فیش را بفرستید.</p>
+                    <p style="font-size:10px; color:#94a3b8; margin-bottom:15px;">واریز به حساب مدیریت کل پلتفرم:</p>
+
+                    <!-- کارت هوشمند داخل مودال مسدودی 👇 -->
+                    <div style="background:#0f172a; padding:20px; border-radius:25px; border:1px solid rgba(251,191,36,0.4); margin-bottom:20px; text-align:right;">
+                        <div onclick="copyCard('${cardInfo.num}')" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; cursor:pointer;">
+                            <i class="fas fa-copy" style="color:#fbbf24; font-size:14px;"></i>
+                            <span style="color:white; font-weight:900; font-family:monospace; letter-spacing:1.5px; font-size:15px;">${cardInfo.num}</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.05); pt:10px; padding-top:10px;">
+                            <span style="font-size:8px; color:#475569; font-weight:bold;">HOLDER:</span>
+                            <span style="font-size:11px; color:#fbbf24; font-weight:900;">${cardInfo.name}</span>
+                        </div>
+                    </div>
                     
-                    <input type="number" id="block-pay-amount" placeholder="مبلغ واریزی (تومان)" style="width:100%; padding:15px; border-radius:18px; border:none; background:#0f172a; color:white; text-align:center; font-weight:bold; margin-bottom:15px; outline:none; border:1px solid #334155;">
+                    <input type="number" id="block-pay-amount" oninput="updateRenewalPreview(this.value)" placeholder="مبلغ واریزی (تومان)" style="width:100%; padding:15px; border-radius:18px; border:none; background:#0f172a; color:white; text-align:center; font-weight:bold; margin-bottom:10px; border:1px solid #334155; outline:none;">
+                    <p id="block-pay-preview" style="font-size:9px; margin-bottom:15px; font-weight:bold; color:#fbbf24;"></p>
                     
                     <input type="file" id="block-pay-file" style="display:none;" onchange="document.getElementById('file-status').innerText='فیش انتخاب شد ✅'">
                     <label for="block-pay-file" style="display:block; background:#0f172a; padding:15px; border-radius:18px; border:1px dashed #475569; color:#94a3b8; font-size:11px; cursor:pointer; margin-bottom:20px;">
-                        <i class="fas fa-camera" style="margin-bottom:5px; font-size:18px; display:block;"></i>
+                        <i class="fas fa-camera" style="display:block; margin-bottom:5px; font-size:18px;"></i>
                         <span id="file-status">انتخاب تصویر فیش واریزی</span>
                     </label>
 
-                    <button id="block-submit-btn" onclick="submitBlockedPayment('${myPoolId}')" style="width:100%; background:#10b981; color:white; padding:15px; border-radius:18px; border:none; font-weight:900; cursor:pointer; box-shadow:0 10px 20px rgba(16,185,129,0.2);">ارسال برای تایید مدیریت</button>
+                    <button id="block-submit-btn" onclick="submitBlockedPayment('${myPoolId}')" style="width:100%; background:#10b981; color:white; padding:15px; border-radius:18px; border:none; font-weight:900; cursor:pointer;">ارسال برای تایید</button>
                     <button onclick="closeBlockedPaymentModal()" style="width:100%; background:none; color:#64748b; padding:10px; border:none; font-size:11px; margin-top:10px; cursor:pointer;">انصراف</button>
                 </div>
             </div>
         </div>
     `;
 
-    // فعالسازی قابلیت ۱۰ ضربه برای شما
+    // فعالسازی ۱۰ ضربه مخفی
     let c = 0;
-    document.getElementById('secret-lock-zone').onclick = () => { c++; if(c===10) window.location.href='super_admin.html'; };
+    const lockZone = document.getElementById('secret-lock-zone');
+    if(lockZone) lockZone.onclick = () => { c++; if(c===10) window.location.href='super_admin.html'; };
 }
+
 
 /************************************************
  * توابع کنترلی مودال مسدودی (کمکی)
@@ -786,36 +1391,36 @@ function closeBlockedPaymentModal() {
     document.getElementById('blocked-pay-modal').style.display = 'none';
 }
 
-async function submitBlockedPayment(poolId) {
+window.submitBlockedPayment = async function(poolId) {
     const amt = document.getElementById('block-pay-amount').value;
     const fileInput = document.getElementById('block-pay-file');
     const btn = document.getElementById('block-submit-btn');
 
-    if(!amt || !fileInput.files[0]) return alert("لطفاً مبلغ و تصویر فیش را وارد کنید ❌");
+    if (!fileInput.files[0]) return alert("لطفاً تصویر فیش را انتخاب کنید ❌");
+    const check = validateAdminFile(fileInput.files[0]);
+    if (!check.valid) return alert(check.msg);
+    if (!amt) return alert("لطفاً مبلغ را وارد کنید");
 
-    btn.disabled = true; btn.innerText = "در حال ارسال فیش...";
+    btn.disabled = true; btn.innerText = "در حال ارسال...";
 
     try {
         const file = fileInput.files[0];
         const fileName = `renewal-blocked-${poolId}-${Date.now()}.jpg`;
         
-        // ۱. آپلود در استوریج
-        await supabaseClient.storage.from('receipts').upload(fileName, file);
+        const { error: upErr } = await supabaseClient.storage.from('receipts').upload(fileName, file);
+        if (upErr) throw upErr;
+
         const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
 
-        // ۲. ثبت در جدول درخواست‌ها
-        await supabaseClient.from('sub_requests').insert([{
-            pool_id: poolId,
-            amount: Number(amt),
-            receipt_url: urlData.publicUrl,
-            status: 'pending'
+        const { error: dbErr } = await supabaseClient.from('sub_requests').insert([{
+            pool_id: poolId, amount: Number(amt), receipt_url: urlData.publicUrl, status: 'pending'
         }]);
+        if (dbErr) throw dbErr;
 
-        alert("✅ فیش شما با موفقیت ارسال شد.\nپس از تایید مدیریت کل، پنل شما خودکار باز خواهد شد.");
+        alert("✅ فیش با موفقیت برای ستاد ارسال شد. پس از تایید، پنل شما خودکار باز می‌شود.");
         location.reload();
-
     } catch (e) {
-        alert("خطا در ارسال: " + e.message);
+        alert("🚨 خطا در فرآیند نجات: " + e.message);
         btn.disabled = false; btn.innerText = "تلاش مجدد";
     }
 }
@@ -827,9 +1432,12 @@ async function submitBlockedPayment(poolId) {
 function updateReceiptBadge(poolId) { supabaseClient.from('transactions').select('id').eq('pool_id', poolId).eq('status', 'pending').then(({data}) => { if (data?.length > 0) document.getElementById('receipt-dot')?.classList.remove('hidden'); }); }
 function closeEditModal() { document.getElementById('edit-modal').classList.add('hidden'); }
 function closeReportModal() { document.getElementById('report-modal').classList.add('hidden'); }
-function openRenewalModal() { document.getElementById('renewal-modal').classList.remove('hidden'); }
-function closeRenewalModal() { document.getElementById('renewal-modal').classList.add('hidden'); }
+
+
 function openBuyQuotaModal() { 
+   
+   loadMasterCardInModals('master-card-quota-area');
+   
     supabaseClient.from('pools').select('share_price').eq('id', sessionStorage.getItem('pool_id')).single().then(({data}) => {
         if(data) document.getElementById('display-share-price').innerText = Number(data.share_price).toLocaleString() + " ت";
     });
@@ -838,199 +1446,1832 @@ function openBuyQuotaModal() {
 function closeQuotaModal() { document.getElementById('quota-modal').classList.add('hidden'); }
 
 
-/************************************************
- * ۱. تابع تمدید اعتبار اشتراک (Subscription)
- ************************************************/
-async function submitRenewalRequest() {
-    const amountInput = document.getElementById('renewal-amount');
-    const fileInput = document.getElementById('renewal-file');
-    const poolId = sessionStorage.getItem('pool_id');
-    const btn = document.getElementById('renewal-submit-btn');
-
-    const amt = amountInput.value.trim();
-    const file = fileInput.files[0];
-
-    // اعتبارسنجی
-    if (!amt || Number(amt) <= 0) return alert("لطفاً مبلغ تمدید اشتراک را وارد کنید ❌");
-    if (!file) return alert("لطفاً تصویر فیش واریزی را انتخاب کنید ❌");
-
-    btn.disabled = true;
-    btn.innerText = "در حال ارسال...";
-
-    try {
-        const fileName = `sub-${poolId}-${Date.now()}.jpg`;
-        
-        // آپلود فیش در Storage
-        const { error: upErr } = await supabaseClient.storage.from('receipts').upload(fileName, file);
-        if (upErr) throw upErr;
-
-        const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
-
-        // ثبت درخواست با برچسب 'subscription' 👇
-        const { error: dbErr } = await supabaseClient.from('sub_requests').insert([{
-            pool_id: poolId,
-            amount: Number(amt),
-            receipt_url: urlData.publicUrl,
-            status: 'pending',
-            request_type: 'subscription' // <--- این خط اضافه شد
-        }]);
-
-        if (dbErr) throw dbErr;
-
-        alert("✅ فیش تمدید اعتبار با موفقیت ارسال شد.\nپس از تایید مدیریت کل، اعتبار پنل شما شارژ می‌شود.");
-        
-        amountInput.value = "";
-        fileInput.value = "";
-        document.getElementById('renewal-file-name').innerText = "آپلود فیش تمدید";
-        closeRenewalModal();
-
-    } catch (err) {
-        alert("خطا در ارسال: " + err.message);
-        btn.disabled = false;
-        btn.innerText = "ارسال برای تایید";
-    }
-}
-
-/************************************************
- * ۲. تابع خرید سهمیه عضو جدید (Quota)
- ************************************************/
-async function submitQuotaRequest() {
-    const amountInput = document.getElementById('quota-amount');
-    const fileInput = document.getElementById('quota-file');
-    const poolId = sessionStorage.getItem('pool_id');
-    const btn = document.getElementById('quota-submit-btn');
-
-    const amt = amountInput.value.trim();
-    const file = fileInput.files[0];
-
-    if (!amt || Number(amt) <= 0) return alert("لطفاً مبلغ واریزی را وارد کنید ❌");
-    if (!file) return alert("لطفاً تصویر فیش واریزی را انتخاب کنید ❌");
-
-    btn.disabled = true;
-    btn.innerText = "در حال ارسال...";
-
-    try {
-        const fileName = `quota-${poolId}-${Date.now()}.jpg`;
-        
-        // آپلود فیش در Storage
-        const { error: upErr } = await supabaseClient.storage.from('receipts').upload(fileName, file);
-        if (upErr) throw upErr;
-
-        const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
-
-        // ثبت درخواست با برچسب 'quota' 👇
-        const { error: dbErr } = await supabaseClient.from('sub_requests').insert([{
-            pool_id: poolId,
-            amount: Number(amt),
-            receipt_url: urlData.publicUrl,
-            status: 'pending',
-            request_type: 'quota' // <--- این خط اضافه شد
-        }]);
-
-        if (dbErr) throw dbErr;
-
-        alert("✅ درخواست خرید سهمیه با موفقیت ارسال شد.\nمدیر کل پس از بررسی، ظرفیت شما را شارژ خواهد کرد.");
-        
-        amountInput.value = "";
-        fileInput.value = "";
-        document.getElementById('quota-file-name').innerText = "آپلود فیش واریزی";
-        closeQuotaModal();
-
-    } catch (e) {
-        alert("خطا در ارسال: " + e.message);
-        btn.disabled = false;
-        btn.innerText = "ارسال درخواست";
-    }
-}
-
-
-function initOneSignalAdmin(myPoolId) { if (typeof OneSignal !== 'undefined') { OneSignal.push(function() { OneSignal.User.addTag("role", "admin"); OneSignal.User.addTag("pool_id", String(myPoolId)); }); } }
 
 /************************************************
  * تابع باز کردن پنجره ویرایش عضو (اصلاح شده)
  ************************************************/
-window.openEditModalById = function(id) {
-    // ۱. پیدا کردن اطلاعات عضو از لیستی که قبلاً بارگذاری شده
-    const member = allMembersData.find(m => m.id === id);
+// در فایل admin_app.js
+window.openEditModalById = function(memberId) {
+    const m = allMembersData.find(x => String(x.id) === String(memberId));
+    if (!m) return;
+
+    document.getElementById('edit-member-id').value = m.id; // UUID در اینجا قرار می‌گیرد
+    document.getElementById('edit-member-name').value = m.full_name;
+    document.getElementById('edit-member-mobile').value = m.mobile;
+    document.getElementById('edit-member-shares').value = m.total_shares || 1;
+    document.getElementById('edit-member-is-admin').checked = m.is_admin || false;
+    document.getElementById('edit-member-pass').value = ""; // رمز را خالی بگذار برای امنیت
+
+    document.getElementById('edit-modal').classList.remove('hidden');
+};
+
+// تابع کپی کردن شماره کارت
+window.copyCard = function(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        alert("شماره کارت کپی شد ✅");
+    });
+}
+ /************************************************
+ * تابع لود هوشمند کارت و نام مدیر کل در مودال‌ها
+ ************************************************/
+async function loadMasterCardInModals(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
     
-    if (!member) {
-        console.error("عضو یافت نشد!");
-        return;
+    container.innerHTML = '<p class="text-[9px] text-center text-yellow-500 animate-pulse font-bold">در حال استعلام مشخصات خزانه...</p>';
+
+    try {
+        // دریافت شماره کارت و نام صاحب حساب از جدول تنظیمات کل
+        const { data, error } = await supabaseClient
+            .from('global_config')
+            .select('master_card, master_card_name')
+            .eq('id', 1)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        const cardNum = (data && data.master_card) ? data.master_card : '---';
+        const cardName = (data && data.master_card_name) ? data.master_card_name : 'نام مشخص نشده';
+
+        container.innerHTML = `
+            <div class="bg-slate-900 p-5 rounded-[2rem] mb-2 border border-yellow-500/30 shadow-2xl relative overflow-hidden">
+                <div onclick="copyCard('${cardNum}')" class="flex justify-between items-center cursor-pointer active:scale-95 transition-all">
+                    <i class="fas fa-copy text-yellow-500 text-sm"></i>
+                    <span class="text-white font-[900] text-sm tracking-[0.15em] font-mono">${cardNum}</span>
+                </div>
+                <!-- نمایش نام صاحب حساب 👇 -->
+                <div class="mt-4 pt-3 border-t border-white/5 flex justify-between items-center">
+                    <span class="text-[8px] text-slate-500 uppercase font-black tracking-widest">Card Holder:</span>
+                    <span class="text-[10px] text-yellow-500 font-bold">${cardName}</span>
+                </div>
+            </div>
+            <p class="text-[8px] text-center text-slate-500 mb-4 font-black">جهت کپی شماره کارت، روی آن ضربه بزنید</p>
+        `;
+    } catch (e) {
+        console.error("Card Load Error:", e);
+        container.innerHTML = '<p class="text-rose-500 text-[9px] text-center">❌ خطا در اتصال به مرکز</p>';
+    }
+}
+
+// ۲. اصلاح تابع باز کردن مودال خرید سهمیه
+window.openBuyQuotaModal = function() { 
+    loadMasterCardInModals('master-card-quota-area'); // صدا زدن لودر کارت
+    
+    const poolId = sessionStorage.getItem('pool_id');
+    supabaseClient.from('pools').select('share_price').eq('id', poolId).single().then(({data}) => {
+        if(data) document.getElementById('display-share-price').innerText = Number(data.share_price).toLocaleString() + " ت";
+    });
+    document.getElementById('quota-modal').classList.remove('hidden'); 
+}
+/************************************************
+ * تابع باز کردن مودال تمدید (با پاکسازی و بستن منو)
+ ************************************************/
+window.openRenewalModal = function() {
+    // ۱. بستن خودکار همبرگر منو (Drawer) 👇
+    if (typeof toggleDrawer === 'function') {
+        toggleDrawer(false);
     }
 
-    // ۲. پر کردن فیلدهای مخفی و نمایشی در مودال ویرایش
-    document.getElementById('edit-member-id').value = member.id;
-    document.getElementById('edit-member-name').value = member.full_name;
-    document.getElementById('edit-member-mobile').value = member.mobile;
-    document.getElementById('edit-member-shares').value = member.total_shares;
-    
-    // تیک مدیریت را بر اساس وضعیت دیتابیس بزن
-    const adminCheckbox = document.getElementById('edit-member-is-admin');
-    if (adminCheckbox) adminCheckbox.checked = member.is_admin;
+    // ۲. پیدا کردن المان‌ها برای پاکسازی 👇
+    const amtInput = document.getElementById('renewal-amount');
+    const fileInput = document.getElementById('renewal-file');
+    const fileStatus = document.getElementById('ren-file-status');
+    const calcPreview = document.getElementById('renewal-calc-preview');
 
-    // کادر رمز عبور را خالی بگذار (طبق قراری که داشتیم مدیر رمز فعلی را نبیند)
-    const passInput = document.getElementById('edit-member-pass');
-    if (passInput) {
-        passInput.value = "";
-        passInput.placeholder = "تغییر رمز عبور (خالی بگذارید تا تغییر نکند)";
-    }
+    // ۳. خالی کردن مقادیر (ریست کردن فرم) 👇
+    if (amtInput) amtInput.value = '';
+    if (fileInput) fileInput.value = '';
+    if (fileStatus) fileStatus.innerText = 'انتخاب تصویر فیش واریزی';
+    if (calcPreview) calcPreview.innerText = '';
 
-    // ۳. ظاهر کردن پنجره مودال
-    const modal = document.getElementById('edit-modal');
+    // ۴. نمایش مودال اصلی
+    const modal = document.getElementById('renewal-modal');
     if (modal) {
         modal.classList.remove('hidden');
-        console.log("💎 پنجره ویرایش برای " + member.full_name + " باز شد.");
-    } else {
-        alert("خطا: پنجره ویرایش (edit-modal) در فایل HTML یافت نشد!");
+        // لود شماره کارت شما
+        if (typeof loadMasterCardInModals === 'function') {
+            loadMasterCardInModals('master-card-renewal-area');
+        }
     }
 };
+
+// ۲. بستن مودال تمدید
+window.closeRenewalModal = function() {
+    const modal = document.getElementById('renewal-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        
+        // پاکسازی مجدد برای اطمینان ۱۰۰٪
+        document.getElementById('renewal-amount').value = '';
+        document.getElementById('renewal-file').value = '';
+        document.getElementById('ren-file-status').innerText = 'انتخاب تصویر فیش واریزی';
+        document.getElementById('renewal-calc-preview').innerText = '';
+    }
+};
+
+// ۳. ارسال رسمی درخواست تمدید به ستاد
+window.submitRenewalRequest = async function() {
+    const amtInput = document.getElementById('renewal-amount');
+    const fileInput = document.getElementById('renewal-file');
+    const btn = document.getElementById('renewal-submit-btn');
+    const poolId = sessionStorage.getItem('pool_id');
+
+    if (!amtInput.value || !fileInput.files[0]) {
+        return Swal.fire({ text: "مبلغ و تصویر فیش الزامی است ❌", icon: 'warning' });
+    }
+
+    toggleLoading('renewal-submit-btn', true, 'در حال ارسال...');
+
+    try {
+        const file = fileInput.files[0];
+        const fileName = `renewal-${poolId}-${Date.now()}.jpg`;
+
+        // آپلود فیش به استوریج
+        await supabaseClient.storage.from('receipts').upload(fileName, file);
+        const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
+
+        // ثبت در جدول درخواست‌ها
+        const { error } = await supabaseClient.from('sub_requests').insert([{
+            pool_id: poolId,
+            amount: Number(amtInput.value),
+            receipt_url: urlData.publicUrl,
+            status: 'pending'
+        }]);
+
+        if (error) throw error;
+
+        await Swal.fire({
+            title: 'ارسال شد ✅',
+            text: 'فیش تمدید برای مدیریت کل ارسال گردید. پس از تایید، اعتبار پنل شما آپدیت می‌شود.',
+            icon: 'success'
+        });
+
+        closeRenewalModal();
+
+    } catch (e) {
+        Swal.fire({ text: "خطا: " + e.message, icon: 'error' });
+    } finally {
+        toggleLoading('renewal-submit-btn', false, 'ارسال درخواست تمدید');
+    }
+};
+
+
+/************************************************
+ * تابع باز و بسته کردن کشویی فرم ثبت عضو جدید
+ ************************************************/
+window.toggleAddMemberForm = function() {
+    const form = document.getElementById('add-member-form');
+    
+    if (form) {
+        // اگر فرم مخفی است، ظاهرش کن و اگر ظاهر است، مخفی‌اش کن
+        form.classList.toggle('hidden');
+        
+        // یک لرزش کوچک (ویبره) برای فیدبک به مدیر
+        if (window.navigator.vibrate) window.navigator.vibrate(10);
+        
+        console.log("وضعیت فرم ثبت‌نام تغییر کرد.");
+    } else {
+        console.error("خطا: المانی با آیدی add-member-form در HTML پیدا نشد!");
+    }
+};
+
+
+window.addNewMember = async function() {
+    const btn = document.getElementById('add-member-btn');
+    const poolId = sessionStorage.getItem('pool_id');
+    
+    // دریافت مقادیر
+    const name = document.getElementById('new-member-name').value.trim();
+    const mobile = document.getElementById('new-member-mobile').value.trim();
+    const pass = document.getElementById('new-member-pass').value.trim();
+    const shares = parseInt(document.getElementById('new-member-shares').value);
+
+    if (!name || !mobile || isNaN(shares)) return Swal.fire({text: "نام، موبایل و تعداد سهم الزامی است", icon:'warning'});
+
+    // ۱. شروع لودینگ
+    if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> در حال ثبت...'; }
+
+    try {
+        // ۲. ساخت هویت در Auth
+        const tempSup = supabase.createClient(S_URL, S_KEY, { auth: { persistSession: false } });
+        const { data: authData, error: authErr } = await tempSup.auth.signUp({
+            email: `${mobile}@ebank.com`,
+            password: pass
+        });
+
+        if (authErr) throw authErr;
+
+        // ۳. ثبت در جدول اعضا
+        const { error: dbErr } = await supabaseClient.from('members').insert([{
+            id: authData.user.id,
+            pool_id: poolId,
+            full_name: name,
+            mobile: mobile,
+            total_shares: shares,
+            is_admin: false,
+            credit_score: 100,
+            eligible_at: new Date().toISOString() // از همین الان واجد شرایط برای ته صف ✅
+        }]);
+
+        if (dbErr) throw dbErr;
+
+        // ۴. کسر سهمیه
+        await supabaseClient.rpc('increment_pool_capacity', { p_id: poolId, amount: -shares });
+
+        Swal.fire({ title: 'ثبت شد ✅', icon: 'success', timer: 1500, showConfirmButton: false });
+
+        // ۵. ریست کردن فرم و بستن کشو
+        document.getElementById('new-member-name').value = '';
+        document.getElementById('new-member-mobile').value = '';
+        document.getElementById('new-member-pass').value = '';
+        document.getElementById('new-member-shares').value = '';
+        
+        toggleAddMemberForm(); // بستن فرم
+        loadAllMembers(poolId); // رفرش لیست اعضا
+        if(typeof updateCapacityDisplay === 'function') updateCapacityDisplay(poolId);
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
+    } finally {
+        // ۶. آزاد کردن حتمی دکمه در هر شرایط 👇
+        if(btn) {
+            btn.disabled = false;
+            btn.innerText = "تایید و ثبت نهایی عضو";
+        }
+    }
+};
+
+/************************************************
+ * تابع باز کردن پروفایل عضو (نسخه نهایی و ضد خطا)
+ ************************************************/
+window.openMemberProfile = async function(memberId) {
+    // ۱. پیدا کردن عضو با دقت در نوع داده (UUID)
+    const m = allMembersData.find(x => String(x.id) === String(memberId));
+    if (!m) return;
+    
+    selectedMemberForReport = m; 
+
+    // ۲. تابع کمکی برای جلوگیری از ارور Cannot set properties of null 👇
+    const safeSet = (id, value, fallback = '---') => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = value || fallback;
+    };
+
+    // ۳. پر کردن اطلاعات متنی با لایه محافظتی
+    safeSet('prof-name', m.full_name);
+    safeSet('prof-mobile', m.mobile);
+    safeSet('prof-card', m.bank_card, 'ثبت نشده');
+    safeSet('prof-contact', m.secondary_contact, 'ثبت نشده');
+    safeSet('prof-address', m.address, 'آدرس ثبت نشده'); // فیلد جدید آدرس ✅
+    
+    // ۴. مدیریت هوشمند آواتار
+    const imgEl = document.getElementById('prof-img');
+    const initialEl = document.getElementById('prof-initial');
+    const containerEl = document.getElementById('prof-avatar-container');
+    
+    if (imgEl && initialEl && containerEl) {
+        if (m.avatar_url && m.avatar_url.trim() !== "") {
+            imgEl.src = m.avatar_url;
+            imgEl.classList.remove('hidden');
+            initialEl.classList.add('hidden');
+        } else {
+            imgEl.classList.add('hidden');
+            initialEl.classList.remove('hidden');
+            initialEl.innerText = m.full_name.charAt(0);
+            
+            // تولید رنگ رندوم ثابت از روی حروف نام
+            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+            const colorCode = m.full_name.charCodeAt(0) % colors.length;
+            containerEl.style.backgroundColor = colors[colorCode];
+        }
+    }
+
+    // ۵. مدیریت دکمه مدارک هویتی
+    const docsBtn = document.getElementById('prof-docs-btn');
+    if (docsBtn) {
+        if (m.documents_url) {
+            docsBtn.onclick = () => window.open(m.documents_url, '_blank');
+            docsBtn.style.opacity = "1";
+            docsBtn.classList.add('border-emerald-200');
+        } else {
+            docsBtn.style.opacity = "0.4";
+            docsBtn.onclick = () => Swal.fire({text:'مدارک هویتی برای این عضو آپلود نشده است.', icon:'info'});
+        }
+    }
+
+    // ۶. نمایش مودال اصلی
+    const profileModal = document.getElementById('member-profile-modal');
+    if (profileModal) {
+        profileModal.classList.remove('hidden');
+    } else {
+        console.error("خطا: مودال پروفایل (member-profile-modal) در HTML پیدا نشد!");
+    }
+    
+    // ۷. بروزرسانی آمارهای مالی (کارت مشکی)
+    if (typeof updateProfileFinancials === 'function') {
+        updateProfileFinancials(m.id);
+    }
+};
+
+
+/************************************************
+ * ۲. تابع باز کردن گزارش مالی (تصفیه حساب)
+ ************************************************/
+window.openReportModalById = async function(memberId) {
+    // ۱. پیدا کردن عضو
+    const m = memberId ? allMembersData.find(x => String(x.id) === String(memberId)) : selectedMemberForReport;
+    if (!m) return;
+
+    // ۲. چک کردن وجود مودال در صفحه (جلوگیری از ارور classList of null) 👇
+    const modal = document.getElementById('report-modal');
+    if (!modal) {
+        console.error("❌ خطای بحرانی: المان report-modal در HTML یافت نشد!");
+        return Swal.fire({ text: 'خطای سیستمی: مودال گزارش در صفحه نیست', icon: 'error' });
+    }
+
+    // ۳. نمایش مودال و شروع پردازش
+    modal.classList.remove('hidden');
+    document.getElementById('rep-name').innerText = m.full_name;
+    document.getElementById('rep-balance').innerHTML = "<p class='text-center py-5 text-indigo-500 animate-pulse text-[10px]'>در حال محاسبه تراز نهایی...</p>";
+
+    try {
+        const { data: txs } = await supabaseClient.from('transactions').select('*').eq('member_id', m.id).eq('status', 'approved');
+
+        const totalIn = txs ? txs.filter(t => t.type === 'in').reduce((s, a) => s + Number(a.amount), 0) : 0;
+        const totalOut = txs ? txs.filter(t => t.type === 'out').reduce((s, a) => s + Number(a.amount), 0) : 0;
+        const balance = totalIn - totalOut;
+        
+        document.getElementById('rep-total-in').innerText = totalIn.toLocaleString() + " ت";
+        document.getElementById('rep-total-out').innerText = totalOut.toLocaleString() + " ت";
+
+        // نمایش وضعیت بدهی/طلبی
+        let statusHtml = "";
+        if (balance > 0) {
+            statusHtml = `<div class='bg-emerald-50 p-4 rounded-2xl border border-emerald-100 text-center'><p class='text-[10px] text-emerald-600 font-black'>بستانکار (پس‌انداز دارد) ✅</p><h3 class='text-lg font-black text-emerald-700'>${balance.toLocaleString()} ت</h3></div>`;
+        } else if (balance < 0) {
+            statusHtml = `<div class='bg-rose-50 p-4 rounded-2xl border border-rose-100 text-center'><p class='text-[10px] text-rose-600 font-black'>بدهکار به صندوق ⚠️</p><h3 class='text-lg font-black text-rose-700'>${Math.abs(balance).toLocaleString()} ت</h3></div>`;
+        } else {
+            statusHtml = `<p class='text-emerald-600 font-black text-center text-sm'>حساب کاملاً تسویه است ✨</p>`;
+        }
+
+        document.getElementById('rep-balance').innerHTML = statusHtml;
+        selectedMemberForReport.finalBalance = balance;
+
+    } catch (e) {
+        document.getElementById('rep-balance').innerText = "خطا در محاسبه";
+    }
+};
+
+/************************************************
+ * ۳. اصلاح دکمه انتقال از پروفایل به گزارش
+ ************************************************/
+/************************************************
+ * تابع جادویی انتقال از پروفایل به گزارش مالی
+ ************************************************/
+window.openReportFromProfile = function() {
+    // ۱. بستن پنجره پروفایل
+    const profileModal = document.getElementById('member-profile-modal');
+    if (profileModal) profileModal.classList.add('hidden');
+    
+    // ۲. باز کردن گزارش برای عضوی که قبلاً در پروفایل باز شده بود
+    // این کار باعث می‌شود نام عضو و آمارش دقیق لود شود
+    if (typeof openReportModalById === 'function') {
+        openReportModalById(); 
+    } else {
+        alert("خطا: تابع گزارش مالی پیدا نشد!");
+    }
+};
+
+
+window.rejectLoan = async function(id, name) {
+// ۱. نمایش سوال تایید رد درخواست با استایل شیک
+const result = await Swal.fire({
+    title: 'رد درخواست وام',
+    text: `آیا از رد درخواست "${name}" مطمئن هستید؟ این مورد از لیست حذف خواهد شد.`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#f59e0b', // نارنجی هشدار
+    cancelButtonColor: '#64748b',  // خاکستری
+    confirmButtonText: 'بله، رد شود',
+    cancelButtonText: 'انصراف',
+    customClass: {
+        popup: 'rounded-[2.5rem]'
+    }
+});
+
+// ۲. اگر تایید نکرد، عملیات متوقف شود
+if (!result.isConfirmed) return;
+
+// ۳. ادامه کدهای آپدیت وضعیت در دیتابیس... 👇
+
+    try {
+        const { error } = await supabaseClient
+            .from('loans')
+            .update({ status: 'rejected' })
+            .eq('id', id);
+
+        if (error) throw error;
+
+        alert("درخواست رد شد ❌");
+        location.reload();
+    } catch (e) {
+        alert("خطا در عملیات رد درخواست");
+    }
+};
+
+/************************************************
+ * سیستم پاکسازی خودکار فیش‌های قدیمی (۳ ماهه)
+ ************************************************/
+/************************************************
+ * سیستم پاکسازی خودکار تصاویر فیش‌های قدیمی (۳ ماهه)
+ * با رابط کاربری SweetAlert2
+ ************************************************/
+async function autoCleanupOldReceipts(poolId) {
+    try {
+        // ۱. محاسبه تاریخ ۳ ماه پیش
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        const dateLimit = threeMonthsAgo.toISOString();
+
+        // ۲. پیدا کردن تراکنش‌هایی که عکس دارند و قدیمی‌تر از ۳ ماه هستند
+        const { data: oldTxs, error } = await supabaseClient
+            .from('transactions')
+            .select('id, receipt_url')
+            .eq('pool_id', poolId)
+            .eq('status', 'approved')
+            .lt('created_at', dateLimit) 
+            .not('receipt_url', 'is', null);
+
+        if (error) throw error;
+
+        // اگر فیش قدیمی پیدا شد، عملیات را شروع کن
+        if (oldTxs && oldTxs.length > 0) {
+            
+            // ۳. نمایش سوال تایید با استایل شیک 👇
+            const result = await Swal.fire({
+                title: 'بهینه‌سازی فضای دیتابیس',
+                html: `تعداد <b style="color:#ef4444">${oldTxs.length}</b> تصویر فیش قدیمی (بیش از ۳ ماه) شناسایی شد.<br><br>` +
+                      `<p style="font-size: 11px; color: #64748b;">پیشنهاد می‌شود ابتدا از بخش تنظیمات <b>گزارش اکسل</b> بگیرید.</p>` +
+                      `<p style="font-size: 11px; color: #1e293b; font-weight: bold; margin-top: 10px;">آیا اجازه می‌دهید تصاویر این فیش‌ها جهت خالی شدن فضای حافظه پاک شوند؟</p>` +
+                      `<p style="font-size: 9px; color: #94a3b8;">(تراز مالی و مبالغ واریزی هرگز پاک نخواهند شد)</p>`,
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonColor: '#10b981', // سبز
+                cancelButtonColor: '#64748b',  // خاکستری
+                confirmButtonText: 'بله، تصاویر پاک شوند',
+                cancelButtonText: 'فعلاً نه',
+                customClass: {
+                    popup: 'rounded-[2.5rem]'
+                }
+            });
+
+            // ۴. اگر مدیر تایید کرد:
+            if (result.isConfirmed) {
+                // نمایش لودینگ برای فرآیند پاکسازی
+                Swal.showLoading();
+
+                for (const tx of oldTxs) {
+                    try {
+                        // استخراج نام فایل از لینک URL
+                        if (tx.receipt_url.includes('receipts/')) {
+                            const urlParts = tx.receipt_url.split('/');
+                            const fileName = urlParts[urlParts.length - 1];
+
+                            // الف) حذف فایل اصلی از Storage
+                            await supabaseClient.storage.from('receipts').remove([fileName]);
+                        }
+
+                        // ب) آپدیت ردیف تراکنش در دیتابیس (فقط آدرس عکس را تغییر می‌دهیم)
+                        await supabaseClient.from('transactions')
+                            .update({ receipt_url: 'پاکسازی شده' })
+                            .eq('id', tx.id);
+
+                    } catch (err) {
+                        console.error(`Error cleaning tx ${tx.id}:`, err);
+                    }
+                }
+
+                // ۵. نمایش پیام موفقیت نهایی 👇
+                await Swal.fire({
+                    title: 'پاکسازی موفق',
+                    text: `تصاویر ${oldTxs.length} فیش قدیمی با موفقیت حذف و فضای دیتابیس شما آزاد گردید ✅`,
+                    icon: 'success',
+                    confirmButtonText: 'بسیار عالی',
+                    confirmButtonColor: '#10b981',
+                    customClass: { popup: 'rounded-[2.5rem]' }
+                });
+                
+                // بروزرسانی آمار صفحه
+                if (typeof calculateStats === 'function') calculateStats(poolId);
+            }
+        }
+    } catch (e) {
+        console.error("Cleanup Error:", e.message);
+    }
+}
+
+
+/************************************************
+ * تابع خروج قطعی و پاکسازی تمام نشست‌ها
+ ************************************************/
+window.handleLogout = async function() {
+    const result = await Swal.fire({
+        title: 'خروج از حساب',
+        text: "آیا مطمئن هستید؟ تمام نشست‌های فعال شما بسته خواهد شد.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444', // قرمز
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'بله، خارج شو',
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+
+    if (result.isConfirmed) {
+        try {
+            // نمایش لودینگ حین پاکسازی
+            Swal.fire({
+                title: 'در حال خروج امن...',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
+
+            // ۱. ابطال رسمی توکن در سرور سوپابیس 👇
+            if (supabaseClient && supabaseClient.auth) {
+                await supabaseClient.auth.signOut();
+            }
+
+            // ۲. پاکسازی حافظه دائمی (LocalStorage) 👇
+            localStorage.removeItem('ebank-auth-session'); // حذف توکن اصلی
+            localStorage.removeItem('last_action_timestamp'); // حذف تایمر نگهبان
+            // اگر می‌خواهی کد صندوق هم پاک شود (اختیاری):
+            // localStorage.removeItem('saved_pool_code');
+
+            // ۳. پاکسازی حافظه موقت (SessionStorage) 👇
+            sessionStorage.clear();
+
+            // ۴. انتقال به صفحه ورود
+            window.location.replace('index.html');
+
+        } catch (e) {
+            console.error("Logout Error:", e);
+            // در صورت بروز هرگونه خطا، باز هم حافظه را پاک کن و خارج شو
+            sessionStorage.clear();
+            localStorage.removeItem('ebank-auth-session');
+            window.location.replace('index.html');
+        }
+    }
+};
+
+
+/************************************************
+ * تابع لود کردن دفتر کل تراکنش‌ها برای مدیر
+ ************************************************/
+let currentHistoryOffset = 0; // متغیر برای ردیابی تعداد لود شده‌ها
+const historyPageSize = 10;   // تعداد در هر بار لود
+
+/************************************************
+ * تابع لود تاریخچه با قابلیت صفحه‌بندی (۱۰تایی)
+ ************************************************/
+window.loadAllPoolTransactions = async function(isLoadMore = false) {
+    const poolId = sessionStorage.getItem('pool_id');
+    const container = document.getElementById('admin-full-history-list');
+    const loadMoreBtn = document.getElementById('load-more-container');
+    
+    if (!isLoadMore) {
+        currentHistoryOffset = 0; // ریست کردن در لود اول
+        container.innerHTML = '';
+        // اجرای پاکسازی خودکار ۱۲ ماهه در اولین لود 👇
+        cleanupVeryOldTransactions(poolId);
+    }
+
+    try {
+        // تعیین محدوده (مثلاً از ۰ تا ۹، دفعه بعد از ۱۰ تا ۱۹)
+        const from = currentHistoryOffset;
+        const to = currentHistoryOffset + historyPageSize - 1;
+
+        const { data: txs, error } = await supabaseClient
+            .from('transactions')
+            .select('*, members(full_name)')
+            .eq('pool_id', poolId)
+            .order('created_at', { ascending: false })
+            .range(from, to); // واکشی فقط ۱۰ مورد 👇
+
+        if (error) throw error;
+
+        if (txs && txs.length > 0) {
+            const html = txs.map(t => {
+              // فرمت استاندارد برای تاریخ شمسی با اعداد انگلیسی
+const date = new Date(t.created_at).toLocaleDateString('fa-IR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    numberingSystem: 'latn' // جادوی تبدیل به اعداد انگلیسی ✅
+});
+                const isOut = ['out', 'capital_spend', 'distribution'].includes(t.type);
+                const memberName = t.members ? t.members.full_name : 'سیستمی / پروژه';
+                
+                let reason = "واریز قسط";
+                if (t.type === 'out') reason = "پرداخت (وام/قرعه)";
+                if (t.type === 'profit') reason = "دریافت سود بازار";
+                if (t.type === 'capital_spend') reason = "خرید دارایی پروژه";
+
+                return `
+                <div class="bg-white p-4 rounded-[2rem] border border-slate-50 flex justify-between items-center shadow-sm animate__animated animate__fadeIn">
+                    <div class="text-right">
+                        <p class="text-[11px] font-black ${isOut ? 'text-rose-600' : 'text-slate-800'}">
+                            ${isOut ? '-' : '+'}${Number(t.amount).toLocaleString()} تومان
+                        </p>
+                        <p class="text-[9px] text-slate-500 mt-1 font-bold">بابت: ${reason} (${memberName})</p>
+                    </div>
+                    <div class="text-left">
+                        <p class="text-[8px] text-slate-400 font-black">${date}</p>
+                        <span class="text-[7px] font-black px-2 py-0.5 rounded-lg ${t.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}">
+                            ${t.status === 'approved' ? 'تایید شد' : 'منتظر'}
+                        </span>
+                    </div>
+                </div>`;
+            }).join('');
+
+            container.insertAdjacentHTML('beforeend', html);
+            currentHistoryOffset += historyPageSize;
+
+            // اگر تعداد دریافت شده کمتر از ۱۰ تا بود، یعنی دیگه تراکنشی نیست و دکمه رو مخفی کن
+            if (txs.length < historyPageSize) {
+                loadMoreBtn.classList.add('hidden');
+            } else {
+                loadMoreBtn.classList.remove('hidden');
+            }
+        } else if (!isLoadMore) {
+            container.innerHTML = '<p class="text-center py-10 text-slate-400 text-[10px]">تراکنشی یافت نشد.</p>';
+        }
+
+    } catch (e) { console.error("History Error:", e); }
+};
+
+/************************************************
+ * تابع پاکسازی خودکار تراکنش‌های قدیمی‌تر از ۱۲ ماه
+ ************************************************/
+async function cleanupVeryOldTransactions(poolId) {
+    try {
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+        const dateLimit = oneYearAgo.toISOString();
+
+        // حذف تراکنش‌های تایید شده که ۱۲ ماه از عمرشان گذشته 👇
+        const { error } = await supabaseClient
+            .from('transactions')
+            .delete()
+                .eq('pool_id', poolId)
+                .eq('status', 'approved')
+                .lt('created_at', dateLimit);
+
+        if (!error) console.log("🧹 پاکسازی دوره‌ای (۱۲ ماهه) انجام شد.");
+    } catch (e) { console.log("Cleanup Error"); }
+}
+
+
+/************************************************
+ * تابع حذف عضو از داخل پروفایل تلگرامی
+ ************************************************/
+window.deleteMemberFromProfile = async function() {
+    if (!selectedMemberForReport) return alert("عضوی انتخاب نشده!");
+    
+    const result = await Swal.fire({
+        title: 'حذف عضو',
+        text: `آیا از حذف "${selectedMemberForReport.full_name}" مطمئن هستید؟`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444'
+    });
+    
+    if (!result.isConfirmed) return;
+    
+    const { error } = await supabaseClient
+        .from('members')
+        .delete()
+        .eq('id', selectedMemberForReport.id);
+    
+    if (!error) {
+        Swal.fire({ title: 'حذف شد', icon: 'success' });
+        closeMemberProfile();
+        loadAllMembers(sessionStorage.getItem('pool_id'));
+    }
+};
+
+
+/************************************************
+ * تابع بستن پروفایل تلگرامی عضو
+ ************************************************/
+window.closeMemberProfile = function() {
+    const modal = document.getElementById('member-profile-modal');
+    if (modal) {
+        // اضافه کردن کلاس hidden برای مخفی شدن
+        modal.classList.add('hidden');
+        
+        // یک ویبره خیلی کوچک برای حس بهتر بازگشت
+        if (window.navigator.vibrate) window.navigator.vibrate(5);
+        
+        console.log("پروفایل عضو بسته شد.");
+    } else {
+        console.error("خطا: مودال پروفایل پیدا نشد!");
+    }
+};
+
+/************************************************
+ * تابع انتقال از پروفایل به مودال ویرایش اطلاعات
+ ************************************************/
+window.openEditModalFromProfile = function() {
+    // ۱. بررسی اینکه آیا عضوی انتخاب شده است؟
+    if (!selectedMemberForReport) {
+        return alert("خطا: عضوی انتخاب نشده است!");
+    }
+
+    // ۲. بستن پنجره پروفایل
+    const profileModal = document.getElementById('member-profile-modal');
+    if (profileModal) profileModal.classList.add('hidden');
+
+    // ۳. باز کردن مودال ویرایش برای همان عضو
+    // ما از آیدی عضوی که در متغیر selectedMemberForReport ذخیره شده استفاده می‌کنیم
+    if (typeof openEditModalById === 'function') {
+        openEditModalById(selectedMemberForReport.id);
+    } else {
+        alert("خطا: سیستم ویرایش پیدا نشد!");
+    }
+};
+
+
+/************************************************
+ * سیستم پیش‌نمایش هوشمند تعرفه‌ها برای مدیر
+ ************************************************/
+
+// ۱. تابع کمکی برای تبدیل روز به فرمت خوانا (ماه، روز، ساعت)
+function formatDuration(totalDays) {
+    if (totalDays < 1 / 24) return "کمتر از یک ساعت";
+    
+    const months = Math.floor(totalDays / 30);
+    const days = Math.floor(totalDays % 30);
+    const hours = Math.round((totalDays - Math.floor(totalDays)) * 24);
+
+    let result = "";
+    if (months > 0) result += `${months} ماه `;
+    if (days > 0) result += `${days} روز `;
+    if (hours > 0 && months === 0) result += `${hours} ساعت`;
+    
+    return result.trim() || "۰ روز";
+}
+
+// ۲. محاسبه آنی تمدید اشتراک
+window.updateRenewalPreview = async function(val) {
+    const poolId = sessionStorage.getItem('pool_id');
+    const previewEl = document.getElementById('renewal-calc-preview') || document.getElementById('block-pay-preview');
+    if (!previewEl) return;
+
+    if (!val || val <= 0) { previewEl.innerText = ""; return; }
+
+    const { data: pool } = await supabaseClient.from('pools').select('sub_price, sub_duration_days').eq('id', poolId).single();
+    
+    const unitPrice = pool.sub_price || 100000;
+    const unitDays = pool.sub_duration_days || 30;
+    
+    const calculatedDays = (Number(val) / unitPrice) * unitDays;
+    
+    if (calculatedDays < 1/24) {
+        previewEl.innerHTML = "<span class='text-rose-500'>⚠️ این مبلغ برای تمدید کافی نیست!</span>";
+    } else {
+        previewEl.innerHTML = `✅ این مبلغ معادل <span class='text-emerald-500'>${formatDuration(calculatedDays)}</span> اعتبار است.`;
+    }
+};
+
+// ۳. محاسبه آنی خرید سهمیه
+window.updateQuotaPreview = async function(val) {
+    const poolId = sessionStorage.getItem('pool_id');
+    const previewEl = document.getElementById('quota-calc-preview');
+    if (!previewEl) return;
+
+    if (!val || val <= 0) { previewEl.innerText = ""; return; }
+
+    const { data: pool } = await supabaseClient.from('pools').select('share_price').eq('id', poolId).single();
+    
+    const pricePerShare = pool.share_price || 10000;
+    const count = Math.floor(Number(val) / pricePerShare);
+    const remainder = Number(val) % pricePerShare;
+
+    if (count <= 0) {
+        previewEl.innerHTML = `<span class='text-rose-500'>❌ حداقل مبلغ خرید سهمیه: ${pricePerShare.toLocaleString()} ت</span>`;
+    } else {
+        let msg = `✅ این مبلغ برای <span class='text-emerald-500'>${count} سهمیه</span> کافی است.`;
+        if (remainder > 0) msg += `<br><span class='text-[7px] text-slate-400'>(مبلغ ${remainder.toLocaleString()} ت اضافه واریز می‌شود)</span>`;
+        previewEl.innerHTML = msg;
+    }
+};
+
+/************************************************
+ * تابع کمکی محاسبه و نمایش آمار مالی در پروفایل عضو
+ ************************************************/
+async function updateProfileFinancials(memberId) {
+    const totalInEl = document.getElementById('prof-total-in');
+    const debtEl = document.getElementById('prof-debt');
+    
+    if (!totalInEl || !debtEl) return;
+
+    // نمایش وضعیت در حال لود
+    totalInEl.innerText = "...";
+    debtEl.innerText = "...";
+
+    try {
+        // ۱. دریافت تمام تراکنش‌های تایید شده ورودی برای این عضو (UUID)
+        const { data: txs, error } = await supabaseClient
+            .from('transactions')
+            .select('amount')
+            .eq('member_id', memberId)
+            .eq('status', 'approved')
+            .eq('type', 'in');
+
+        if (error) throw error;
+
+        // ۲. محاسبه مجموع واریزی‌ها
+        const totalIn = txs ? txs.reduce((sum, t) => sum + Number(t.amount), 0) : 0;
+
+        // ۳. پیدا کردن سقف بدهی عضو از متغیر سراسری
+        const member = allMembersData.find(x => String(x.id) === String(memberId));
+        const debtTarget = member ? Number(member.debt_target || 0) : 0;
+
+        // ۴. نمایش مبالغ در پروفایل
+        totalInEl.innerText = totalIn.toLocaleString() + ' ت';
+        
+        // محاسبه مانده بدهی (سقف بدهی منهای واریزی‌ها)
+        const remainingDebt = Math.max(0, debtTarget - totalIn);
+        debtEl.innerText = remainingDebt.toLocaleString() + ' ت';
+
+    } catch (e) {
+        console.error("Error updating profile financials:", e);
+        totalInEl.innerText = "خطا";
+        debtEl.innerText = "خطا";
+    }
+}
+
+async function handleLogin() {
+    const mobile = document.getElementById('login-mobile').value.trim();
+    const password = document.getElementById('login-password').value;
+    
+    if (!mobile || !password) {
+        return alert("لطفاً تمام فیلدها را پر کنید");
+    }
+    
+    const fakeEmail = `${mobile}@ebank.com`;
+    
+    try {
+        // ورود از طریق Supabase Auth
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email: fakeEmail,
+            password: password  // رمز خام را بفرست (هش نکن)
+        });
+        
+        if (error) throw error;
+        
+        // بعد از ورود موفق، اطلاعات عضو را از جدول بگیر
+        const { data: member } = await supabaseClient
+            .from('members')
+            .select('*')
+            .eq('mobile', mobile)
+            .single();
+        
+        if (!member) throw new Error("اطلاعات کاربری یافت نشد");
+        
+        // ذخیره در Session
+        sessionStorage.setItem('user_id', member.id);
+        sessionStorage.setItem('pool_id', member.pool_id);
+        sessionStorage.setItem('is_admin', member.is_admin);
+        
+        // هدایت به پنل مناسب
+        window.location.href = member.is_admin ? 'admin.html' : 'panel.html';
+        
+    } catch (error) {
+        alert("خطا: " + error.message);
+    }
+}
+
+
+/************************************************
+ * تابع کمکی برای نمایش عدد سهمیه باقی‌مانده مدیر
+ ************************************************/
+// ۱. تابع لود کردن تعداد سهمیه باقی‌مانده مدیر
+async function updateCapacityDisplay(poolId) {
+    try {
+        const { data: pool } = await supabaseClient.from('pools').select('member_capacity').eq('id', poolId).single();
+        if (pool) {
+            const display = document.getElementById('member-capacity-display');
+            if (display) display.innerText = pool.member_capacity;
+        }
+    } catch (e) { console.log("Capacity load error"); }
+}
+
+// ۱. باز کردن مودال و ریست کردن آن 👇
+window.openBuyQuotaModal = function() {
+    // ریست کردن فیلدها قبل از نمایش
+    const amtInput = document.getElementById('quota-amount');
+    const fileInput = document.getElementById('quota-file');
+    const label = document.getElementById('quota-file-label');
+    const btn = document.getElementById('quota-submit-btn');
+
+    if(amtInput) amtInput.value = '';
+    if(fileInput) fileInput.value = '';
+    if(label) label.innerHTML = '<i class="fas fa-camera"></i> انتخاب تصویر فیش';
+    if(btn) { btn.disabled = false; btn.innerText = 'ارسال برای تایید ستاد'; }
+    
+    document.getElementById('quota-modal').classList.remove('hidden');
+    loadMasterCardInModals('master-card-quota-area');
+};
+
+// ۲. بستن مودال
+window.closeQuotaModal = function() {
+    document.getElementById('quota-modal').classList.add('hidden');
+};
+
+// ۳. ارسال فیش با چک کردن "حداقل مبلغ" 👇
+window.submitQuotaRequest = async function() {
+    const amtInput = document.getElementById('quota-amount');
+    const fileInput = document.getElementById('quota-file');
+    const btn = document.getElementById('quota-submit-btn');
+    const poolId = sessionStorage.getItem('pool_id');
+
+    const amount = Number(amtInput.value);
+
+    // دریافت حداقل قیمت هر سهمیه از دیتابیس برای مقایسه
+    const { data: pool } = await supabaseClient.from('pools').select('share_price').eq('id', poolId).single();
+    const minPrice = pool ? pool.share_price : 10000;
+
+    // لایه محافظتی مبلغ 👇
+    if (amount < minPrice) {
+        return Swal.fire({
+            title: 'مبلغ ناچیز',
+            text: `حداقل مبلغ برای خرید سهمیه ${minPrice.toLocaleString()} تومان است.`,
+            icon: 'error',
+            confirmButtonColor: '#ef4444'
+        });
+    }
+
+    if (!fileInput.files[0]) return Swal.fire({text: "تصویر فیش الزامی است", icon: 'warning'});
+
+    toggleLoading('quota-submit-btn', true, 'در حال ارسال فیش...');
+
+    try {
+        const file = fileInput.files[0];
+        const fileName = `quota-${poolId}-${Date.now()}.jpg`;
+        await supabaseClient.storage.from('receipts').upload(fileName, file);
+        const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
+
+        const { error } = await supabaseClient.from('sub_requests').insert([{
+            pool_id: poolId, amount: amount, receipt_url: urlData.publicUrl, status: 'pending'
+        }]);
+
+        if (error) throw error;
+
+        await Swal.fire({ title: 'ارسال شد ✅', text: 'منتظر تایید مدیریت کل بمانید', icon: 'success' });
+        closeQuotaModal();
+    } catch (e) {
+        Swal.fire({ text: e.message, icon: 'error' });
+        toggleLoading('quota-submit-btn', false, 'تلاش مجدد');
+    }
+};
+
+
+/************************************************
+ * تابع تحلیل عملکرد پروژه (نسخه فیکس شده)
+ ************************************************/
+window.showProjectFullAnalysis = function(projectId) {
+    // پیدا کردن دیتای پروژه از حافظه موقت (کش)
+    const project = allProjectsDataCache.find(x => String(x.id) === String(projectId));
+    
+    if (!project) {
+        return Swal.fire({ text: "دیتای پروژه یافت نشد! لیست را رفرش کنید.", icon: 'error' });
+    }
+
+    const profit = Number(project.total_profit || 0);
+    const investment = Number(project.invested_amount || 0);
+    
+    // محاسبات زمانی
+    const start = new Date(project.created_at);
+    const now = new Date();
+    const diffDays = Math.ceil(Math.abs(now - start) / (1000 * 60 * 60 * 24)) || 1;
+    
+    const dailyProfit = Math.floor(profit / diffDays);
+    const roi = investment > 0 ? ((profit / investment) * 100).toFixed(1) : "0.0";
+
+    Swal.fire({
+        title: `<span style="font-size:18px; font-[900]; color:#1e293b;">گزارش عملکرد: ${project.name}</span>`,
+        html: `
+            <div style="direction:rtl; text-align:right; margin-top:20px;">
+                <div style="display:flex; justify-content:space-between; padding:12px; background:#f8fafc; border-radius:15px; margin-bottom:8px; border:1px solid #e2e8f0;">
+                    <span style="font-size:11px; color:#64748b;">📅 عمر پروژه:</span>
+                    <span style="font-size:12px; font-weight:900; color:#1e293b;">${diffDays} روز</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; padding:12px; background:#f0fdf4; border-radius:15px; margin-bottom:8px; border:1px solid #dcfce7;">
+                    <span style="font-size:11px; color:#166534;">💰 سرمایه درگیر:</span>
+                    <span style="font-size:12px; font-weight:900; color:#15803d;">${investment.toLocaleString()} ت</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; padding:12px; background:#fffbeb; border-radius:15px; margin-bottom:15px; border:1px solid #fef3c7;">
+                    <span style="font-size:11px; color:#92400e;">📈 بازدهی کل (ROI):</span>
+                    <span style="font-size:12px; font-weight:900; color:#b45309;">${roi}%</span>
+                </div>
+                <div style="background:#0f172a; color:#94a3b8; padding:15px; border-radius:20px; text-align:center; font-size:10px; line-height:1.7;">
+                    <i class="fas fa-bolt text-yellow-400 mb-2" style="font-size:16px;"></i><br>
+                    میانگین سود تولید شده توسط این پروژه:<br>
+                    <b style="color:white; font-size:14px;">${dailyProfit.toLocaleString()} تومان در روز</b>
+                </div>
+            </div>
+        `,
+        confirmButtonText: 'متوجه شدم',
+        confirmButtonColor: '#10b981',
+        customClass: { popup: 'rounded-[3rem] border-none shadow-2xl' }
+    });
+};
+
+
+/************************************************
+ * تابع مدیریت و نمایش صف انتظار وام نوبتی
+ ************************************************/
+window.loadLoanQueue = async function(poolId) {
+    const container = document.getElementById('loan-queue-list');
+    if (!container || !poolId) return;
+
+    try {
+        const { data: members } = await supabaseClient.from('members').select('*').eq('pool_id', poolId).eq('is_admin', false);
+        const { data: txs } = await supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved');
+
+        const queue = members.map(m => {
+            const userIn = txs.filter(t => t.member_id === m.id && t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
+            const userOutMonthly = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
+            const isEligible = (userOutMonthly - userIn) <= 0;
+            return { ...m, isEligible };
+        });
+
+        // مرتب سازی: اولویت با آماده‌ها و بعد قدیمی‌ترین تاریخ صلاحیت
+        const sorted = queue.sort((a, b) => {
+            if (a.isEligible && !b.isEligible) return -1;
+            if (!a.isEligible && b.isEligible) return 1;
+            return new Date(a.eligible_at || 0) - new Date(b.eligible_at || 0);
+        });
+
+        container.innerHTML = sorted.map((m, idx) => `
+            <div class="bg-white p-5 rounded-[2rem] border border-slate-50 flex justify-between items-center shadow-sm">
+                <div class="flex items-center gap-4">
+                    <span class="w-10 h-10 ${m.isEligible ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'} rounded-2xl flex items-center justify-center font-black text-xs shadow-sm">
+                        ${idx + 1}
+                    </span>
+                    <div class="text-right">
+                        <h5 class="text-xs font-black text-slate-800">${m.full_name}</h5>
+                        <p class="text-[8px] ${m.isEligible ? 'text-emerald-500' : 'text-rose-400'} font-bold mt-0.5">
+                            ${m.isEligible ? '✅ آماده دریافت وام' : '❌ بدهکار (در انتظار تسویه)'}
+                        </p>
+                    </div>
+                </div>
+                ${m.isEligible ? `<button onclick="payStandardLoan('${m.id}', '${m.full_name}')" class="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-[9px] font-black active:scale-95">واریز وام</button>` : ''}
+            </div>
+        `).join('');
+    } catch (e) { console.log(e); }
+};
+
+/************************************************
+ * ۱. تابع پرداخت وام نوبتی (Standard Turn Loan)
+ * مخصوص نفر اول صف - بروزرسانی بر اساس ID
+ ************************************************/
+window.payStandardLoan = async function(memberId, memberName) {
+    const poolId = sessionStorage.getItem('pool_id');
+
+    // ۱. تایید مبلغ و عملیات
+    const { value: amount } = await Swal.fire({
+        title: 'پرداخت وام نوبتی',
+        html: `<p style="font-size:12px; color:#64748b;">واریز وام ماهانه برای: <b>${memberName}</b></p>`,
+        input: 'number',
+        inputValue: '80000000', // مبلغ فرضی ۸۰ میلیون
+        showCancelButton: true,
+        confirmButtonText: 'تایید و کسر از صندوق',
+        confirmButtonColor: '#4f46e5',
+        customClass: { popup: 'rounded-[2.5rem]' },
+        inputValidator: (value) => {
+            if (!value || value <= 0) return 'لطفاً مبلغ معتبری وارد کنید! ❌';
+        }
+    });
+
+    if (!amount) return;
+
+    try {
+        Swal.fire({ title: 'در حال ثبت تراکنش...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+        // ۲. ثبت سند خروجی در جدول تراکنش‌ها
+        const { error: txErr } = await supabaseClient.from('transactions').insert([{
+            pool_id: poolId,
+            member_id: memberId,
+            amount: Number(amount),
+            status: 'approved',
+            type: 'out',
+            category: 'monthly', // دسته‌بندی وام نوبتی
+            receipt_url: 'نوبت وام ماهانه'
+        }]);
+
+        if (txErr) throw txErr;
+
+        // ۳. دریافت بدهی فعلی عضو برای آپدیت دقیق (بر اساس ID) 👇
+        const { data: memberData } = await supabaseClient
+            .from('members')
+            .select('debt_target')
+            .eq('id', memberId)
+            .single();
+
+        // ۴. بروزرسانی وضعیت عضو (خروج از صف + افزایش بدهی) 👇
+        const { error: memErr } = await supabaseClient
+            .from('members')
+            .update({
+                last_turn_at: new Date().toISOString(),
+                eligible_at: null, // خروج از صف واجدین شرایط
+                debt_target: (Number(memberData?.debt_target) || 0) + Number(amount),
+                debt_warning_msg: null
+            })
+            .eq('id', memberId); // استفاده از آیدی به جای نام ✅
+
+        if (memErr) throw memErr;
+
+        await Swal.fire({ title: 'واریز موفقیت‌آمیز ✅', text: `${memberName} وام خود را دریافت کرد و به انتهای صف منتقل شد.`, icon: 'success' });
+        
+        // رفرش داده‌های صفحه
+        if (typeof loadOpsTabContent === 'function') loadOpsTabContent(poolId);
+        if (typeof calculateStats === 'function') calculateStats(poolId);
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا در عملیات', text: e.message, icon: 'error' });
+    }
+};
+
+/************************************************
+ * تابع باز و بسته کردن کرکره‌های تنظیمات
+ ************************************************/
+window.toggleAccordion = function(contentId, iconId) {
+    const content = document.getElementById(contentId);
+    const icon = document.getElementById(iconId);
+
+    if (content.classList.contains('max-h-0')) {
+        // باز کردن
+        content.classList.remove('max-h-0');
+        content.classList.add('max-h-screen');
+        icon.classList.add('rotate-180');
+    } else {
+        // بستن
+        content.classList.remove('max-h-screen');
+        content.classList.add('max-h-0');
+        icon.classList.remove('rotate-180');
+    }
+    
+    // لرزش خفیف برای حس بهتر
+    if (window.navigator.vibrate) window.navigator.vibrate(10);
+};
+
+/************************************************
+ * سیستم نگهبان: انقضای خودکار نشست (Auto-Logout)
+ ************************************************/
+const INACTIVITY_LIMIT = 30 * 60 * 1000; // زمان انتظار: ۳۰ دقیقه (به میلی‌ثانیه)
+
+// ۱. بروزرسانی زمان آخرین فعالیت
+function updateLastActivity() {
+    localStorage.setItem('last_action_timestamp', Date.now());
+}
+
+// ۲. چک کردن وضعیت انقضا
+async function checkInactivityTimeout() {
+    const lastAction = localStorage.getItem('last_action_timestamp');
+    const now = Date.now();
+    
+    if (lastAction && (now - lastAction > INACTIVITY_LIMIT)) {
+        console.log("⏰ زمان قانونی نشست به پایان رسید. خروج خودکار...");
+        
+        // پاکسازی و خروج رسمی
+        if (typeof supabaseClient !== 'undefined') {
+            await supabaseClient.auth.signOut();
+        }
+        
+        sessionStorage.clear();
+        // حذف توکن‌های حساس از حافظه دائمی
+        localStorage.removeItem('ebank-auth-session');
+        localStorage.removeItem('last_action_timestamp');
+        
+        // نمایش پیام اطلاع‌رسانی قبل از انتقال
+        Swal.fire({
+            title: 'پایان نشست امنیتی',
+            text: 'به دلیل عدم فعالیت طولانی، جهت حفظ امنیت حساب شما، خروج خودکار انجام شد.',
+            icon: 'info',
+            confirmButtonText: 'ورود مجدد',
+            confirmButtonColor: '#10b981',
+            allowOutsideClick: false
+        }).then(() => {
+            window.location.replace('index.html');
+        });
+    }
+}
+
+// ۳. فعال‌سازی شنودگرهای فعالیت کاربر
+function initSecurityMonitor() {
+    // رویدادهایی که نشانه فعالیت کاربر هستند
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+    
+    activityEvents.forEach(event => {
+        window.addEventListener(event, updateLastActivity, true);
+    });
+    
+    // چک کردن اولیه در زمان لود صفحه
+    checkInactivityTimeout();
+    
+    // چک کردن دوره‌ای هر ۱ دقیقه یکبار در پس‌زمینه
+    setInterval(checkInactivityTimeout, 60000);
+}
+
+
+window.loadUnifiedStream = async function() {
+    const container = document.getElementById('unified-admin-stream');
+    const pId = sessionStorage.getItem('pool_id');
+    if (!container || !pId) return;
+
+    try {
+        const [newsRes, pollsRes, votesRes, membersCountRes] = await Promise.all([
+            supabaseClient.from('admin_news').select('*').eq('pool_id', pId),
+            supabaseClient.from('admin_polls').select('*').eq('pool_id', pId),
+            supabaseClient.from('poll_votes').select('poll_id, vote_type'),
+            supabaseClient.from('members').select('id', { count: 'exact', head: true }).eq('pool_id', pId).eq('is_admin', false)
+        ]);
+
+        const totalInPool = membersCountRes.count || 0;
+        let stream = [];
+        if (newsRes.data) newsRes.data.forEach(n => stream.push({ ...n, sType: 'news' }));
+        if (pollsRes.data) pollsRes.data.forEach(p => stream.push({ ...p, sType: 'poll' }));
+        stream.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        if (stream.length === 0) {
+            container.innerHTML = '<p class="text-center py-20 text-slate-400 text-[10px] font-black uppercase">No Data Found</p>';
+            return;
+        }
+
+        container.innerHTML = stream.map(item => {
+            const isNews = item.sType === 'news';
+            const content = isNews ? item.message : item.question;
+            // استفاده از fa-IR همراه با اعداد انگلیسی (latn) 👇
+const date = new Date(item.created_at).toLocaleDateString('fa-IR', { numberingSystem: 'latn' });
+
+            if (isNews) {
+                return `
+                <div onclick="this.classList.toggle('expanded')" class="glass-feed-card news-theme animate__animated animate__fadeInUp">
+                    <div class="category-label bg-amber-500 shadow-lg shadow-amber-500/20">خبر جدید</div>
+                    <div class="flex justify-between items-center mb-3 pt-2">
+                        <span class="text-[10px] text-slate-300 font-bold">${date}</span>
+                        <button onclick="event.stopPropagation(); deleteItem('admin_news', ${item.id})" class="text-white/30 p-1 hover:text-rose-500 transition-all">
+                            <i class="fas fa-trash-alt text-[10px]"></i>
+                        </button>
+                    </div>
+                    <p class="text-[11px] font-bold text-right text-slate-200 leading-relaxed pr-1">${content}</p>
+                    <div class="content-overlay"></div>
+                </div>`;
+            } else {
+                const votes = votesRes.data ? votesRes.data.filter(v => v.poll_id === item.id) : [];
+                const yes = votes.filter(v => v.vote_type === 'yes').length;
+                const no = votes.filter(v => v.vote_type === 'no').length;
+                const totalVotes = yes + no;
+                const notVoted = Math.max(0, totalInPool - totalVotes);
+                const yesP = totalInPool > 0 ? Math.round((yes / totalInPool) * 100) : 0;
+                const noP = totalInPool > 0 ? Math.round((no / totalInPool) * 100) : 0;
+                const nvP = totalInPool > 0 ? Math.round((notVoted / totalInPool) * 100) : 0;
+
+                return `
+                <div onclick="this.classList.toggle('expanded')" class="glass-feed-card poll-theme animate__animated animate__fadeInUp">
+                    <div class="category-label bg-indigo-600 shadow-lg shadow-indigo-600/20">نظرسنجی</div>
+                    <div class="flex justify-between items-center mb-3 pt-2">
+                        <span class="text-[10px] text-slate-300 font-bold">${date}</span>
+                        <button onclick="event.stopPropagation(); deleteItem('admin_polls', ${item.id})" class="text-white/30 p-1 hover:text-rose-500 transition-all">
+                            <i class="fas fa-trash-alt text-[10px]"></i>
+                        </button>
+                    </div>
+                    <h5 class="text-[11px] font-black text-right text-white leading-relaxed pr-1">${item.question}</h5>
+                    <div class="content-overlay"></div>
+                    <div class="stats-area space-y-4 border-t border-white/5 pt-4">
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[7px] font-black uppercase"><span class="text-emerald-400">موافق: ${yes}</span><span class="text-slate-500">${yesP}%</span></div>
+                            <div class="w-full bg-white/5 h-1.5 rounded-full overflow-hidden"><div class="bg-emerald-500 h-full shadow-[0_0_8px_#10b981]" style="width:${yesP}%"></div></div>
+                        </div>
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[7px] font-black uppercase"><span class="text-rose-400">مخالف: ${no}</span><span class="text-slate-500">${noP}%</span></div>
+                            <div class="w-full bg-white/5 h-1.5 rounded-full overflow-hidden"><div class="bg-rose-500 h-full shadow-[0_0_8px_#ef4444]" style="width:${noP}%"></div></div>
+                        </div>
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[7px] font-black uppercase"><span class="text-slate-400">شرکت نکرده: ${notVoted}</span><span class="text-slate-600">${nvP}%</span></div>
+                            <div class="w-full bg-white/5 h-1.5 rounded-full overflow-hidden border border-white/5"><div class="bg-slate-600 h-full shadow-[0_0_8px_#475569]" style="width:${nvP}%"></div></div>
+                        </div>
+                    </div>
+                </div>`;
+            }
+            
+            // در انتهای تابع loadUnifiedStream بعد از چسباندن کدها 👇
+setTimeout(() => {
+    const container = document.getElementById('unified-admin-stream');
+    if (container) container.scrollTop = 0;
+}, 300);
+            
+            
+        }).join('');
+    } catch (e) { console.error(e); }
+};
+
+/************************************************
+ * توابع کمکی جابجایی و حذف (حتما باید باشند)
+ ************************************************/
+window.handleCardClick = function(cardEl, isLong) {
+    if (!isLong) return;
+    const text = cardEl.querySelector('.text-content');
+    const btn = cardEl.querySelector('.read-more-btn');
+    
+    if (cardEl.classList.contains('expanded')) {
+        cardEl.classList.remove('expanded');
+        if(text) text.classList.add('line-clamp-3');
+        if(btn) btn.innerText = "مشاهده کامل...";
+    } else {
+        cardEl.classList.add('expanded');
+        if(text) text.classList.remove('line-clamp-3');
+        if(btn) btn.innerText = "بستن متن";
+        if(navigator.vibrate) navigator.vibrate(10);
+    }
+};
+
+window.deleteItem = async function(table, id) {
+    const result = await Swal.fire({
+        title: 'حذف از تایم‌لاین؟',
+        text: 'این مورد برای همیشه از دید اعضا خارج خواهد شد.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        confirmButtonText: 'بله، پاک کن',
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem] glass-card' }
+    });
+
+    if (result.isConfirmed) {
+        await supabaseClient.from(table).delete().eq('id', id);
+        loadUnifiedStream(); // رفرش لیست
+    }
+};
+/************************************************
+ * ۱. تابع ثبت خبر جدید (پاپ‌آپ مدرن)
+ ************************************************/
+window.openCreateNews = async function() {
+    const { value: text } = await Swal.fire({
+        title: 'انتشار اطلاعیه جدید',
+        input: 'textarea',
+        inputPlaceholder: 'متن خبر یا اعلان را اینجا بنویسید...',
+        showCancelButton: true,
+        confirmButtonText: 'ارسال و انتشار 🚀',
+        cancelButtonText: 'انصراف',
+        confirmButtonColor: '#f59e0b', // رنگ Amber هماهنگ با تم خبر
+        customClass: { popup: 'rounded-[2.5rem] glass-card' },
+        inputValidator: (value) => {
+            if (!value) return 'نمیتوانید خبر خالی منتشر کنید!';
+        }
+    });
+
+    if (text) {
+        Swal.showLoading();
+        const pId = sessionStorage.getItem('pool_id');
+        const { error } = await supabaseClient.from('admin_news').insert([{ 
+            pool_id: pId, 
+            message: text 
+        }]);
+
+        if (!error) {
+            Swal.fire({ title: 'منتشر شد ✅', icon: 'success', toast: true, position: 'top-end', timer: 2500, showConfirmButton: false });
+            loadUnifiedStream(); // رفرش آنی لیست
+        } else {
+            Swal.fire({ text: 'خطا در ثبت خبر', icon: 'error' });
+        }
+    }
+};
+
+/************************************************
+ * ۲. تابع ایجاد نظرسنجی جدید (پاپ‌آپ مدرن)
+ ************************************************/
+window.openCreatePoll = async function() {
+    const { value: question } = await Swal.fire({
+        title: 'طرح نظرسنجی جدید',
+        input: 'text',
+        inputPlaceholder: 'سوال خود را مطرح کنید (مثلاً: موافقید طلا بخریم؟)',
+        showCancelButton: true,
+        confirmButtonText: 'شروع رای‌گیری 🗳️',
+        cancelButtonText: 'انصراف',
+        confirmButtonColor: '#6366f1', // رنگ Indigo هماهنگ با تم رای
+        customClass: { popup: 'rounded-[2.5rem] glass-card' },
+        inputValidator: (value) => {
+            if (!value) return 'لطفاً سوال نظرسنجی را بنویسید!';
+        }
+    });
+
+    if (question) {
+        Swal.showLoading();
+        const pId = sessionStorage.getItem('pool_id');
+        const { error } = await supabaseClient.from('admin_polls').insert([{ 
+            pool_id: pId, 
+            question: question, 
+            is_active: true 
+        }]);
+
+        if (!error) {
+            Swal.fire({ title: 'نظرسنجی فعال شد ✅', icon: 'success', toast: true, position: 'top-end', timer: 2500, showConfirmButton: false });
+            loadUnifiedStream(); // رفرش آنی لیست
+        } else {
+            Swal.fire({ text: 'خطا در ثبت نظرسنجی', icon: 'error' });
+        }
+    }
+};
+
+/************************************************
+ * ۳. تابع حذف آیتم از تایم‌لاین (خبر یا نظرسنجی)
+ ************************************************/
+window.deleteItem = async function(tableName, id) {
+    const result = await Swal.fire({
+        title: 'حذف از تایم‌لاین؟',
+        text: "این عملیات غیرقابل بازگشت است و تمام آرای مربوط به آن (اگر نظرسنجی باشد) پاک خواهد شد.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'بله، حذف شود',
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem] glass-card' }
+    });
+
+    if (result.isConfirmed) {
+        Swal.showLoading();
+        const { error } = await supabaseClient.from(tableName).delete().eq('id', id);
+
+        if (!error) {
+            Swal.fire({ title: 'پاکسازی شد 🗑️', icon: 'success', toast: true, position: 'top-end', timer: 2000, showConfirmButton: false });
+            loadUnifiedStream(); // رفرش آنی لیست
+        } else {
+            Swal.fire({ text: 'خطا در حذف آیتم', icon: 'error' });
+        }
+    }
+};
+
+
 
 
 window.sendPushToUnpaid = async function() {
-    // ۱. پاکسازی کلیدها (مطمئن شو که فاصله اضافی ندارند)
-    const APP_ID = "6235857d-565c-4223-bffa-af420f2cd45b".trim(); 
-    const API_KEY = "os_v2_app_mi2yk7kwlrbchp72v5ba6lgulm3yudga3sbeet5dt2feqhyer27faufsiea2acnuio5vcmebonhdyyw5vqqo6zfqc3i3gnyw6".trim();
-    
-    const myPoolId = sessionStorage.getItem('pool_id');
-    if (!confirm("🔔 آیا از ارسال پیام به بدهکاران اطمینان دارید؟")) return;
+    const poolId = sessionStorage.getItem('pool_id');
+    const { value: customMsg } = await Swal.fire({
+        title: 'ارسال اخطار داخلی',
+        text: 'متن یادآوری برای بدهکاران این ماه را بنویسید:',
+        input: 'textarea',
+        inputValue: 'لطفاً نسبت به پرداخت واریزی ماه جاری اقدام فرمایید.',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444'
+    });
 
-    try {
-        const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    if (customMsg) {
+        Swal.showLoading();
+        // ۱. پیدا کردن بدهکاران (همان منطق قبلی)
+        const now = new Date();
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        const { data: members } = await supabaseClient.from('members').select('id').eq('pool_id', poolId).eq('is_admin', false);
+        const { data: paidUsers } = await supabaseClient.from('transactions').select('member_id').eq('pool_id', poolId).eq('status', 'approved').gte('created_at', firstDay);
         
-        // دریافت آیدی بدهکاران
-        const { data: members } = await supabaseClient.from('members').select('id').eq('pool_id', myPoolId).eq('is_admin', false);
-        const { data: paid } = await supabaseClient.from('transactions').select('member_id').eq('pool_id', myPoolId).eq('status', 'approved').eq('type', 'in').gte('created_at', firstDay);
+        const paidIds = paidUsers.map(p => String(p.member_id));
+        const unpaidIds = members.filter(m => !paidIds.includes(String(m.id))).map(m => m.id);
 
-        const paidIds = paid.map(p => String(p.member_id));
-        const unpaidIds = members.filter(m => !paidIds.includes(String(m.id))).map(m => String(m.id));
+        // ۲. آپدیت ستون اخطار برای تمام بدهکاران به صورت یکجا 👇
+        await supabaseClient
+            .from('members')
+            .update({ debt_warning_msg: customMsg })
+            .in('id', unpaidIds);
 
-        if (unpaidIds.length === 0) return alert("همه اعضا تسویه کرده‌اند ✨");
+        // ۳. پاک کردن اخطار برای کسانی که پرداخت کرده‌اند
+        await supabaseClient
+            .from('members')
+            .update({ debt_warning_msg: null })
+            .eq('pool_id', poolId)
+            .in('id', paidIds);
 
-        // ۲. ارسال درخواست (با تنظیمات اضافه برای رفع Failed to fetch)
-        const response = await fetch("https://onesignal.com/api/v1/notifications", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json; charset=utf-8",
-                "Authorization": "Basic " + API_KEY
-            },
-            body: JSON.stringify({
-                app_id: APP_ID,
-                include_external_user_ids: unpaidIds,
-                headings: { "fa": "یادآوری واریز قسط" },
-                contents: { "fa": "هم‌صندوقی عزیز، وقت واریز قسط این ماه رسیده است. لطفاً اقدام کنید." }
-            })
-        });
-
-        if (response.ok) {
-            alert(`🚀 موفقیت: پیام برای ${unpaidIds.length} نفر شلیک شد.`);
-        } else {
-            const errorBody = await response.text();
-            alert("خطا در پاسخ سرور OneSignal: " + errorBody);
-        }
-
-    } catch (e) {
-        // اگر فیلترشکن قطع باشد یا روی localhost باشید این ارور میاد 👇
-        alert("🚨 خطای شبکه (Failed to fetch):\n۱. فیلترشکن را روشن کنید.\n۲. حتماً روی لینک Vercel تست کنید.");
-        console.error("Fetch Error:", e);
+        Swal.fire({ title: 'پیام‌ها روی تابلوی اعضا ثبت شد ✅', icon: 'success' });
     }
 };
+
+
+/************************************************
+ * تابع نمایش فیش‌های منتظر (نسخه اصلاح شده v14.5)
+ ************************************************/
+async function loadPendingReceipts(poolId) {
+    const container = document.getElementById('admin-verify-list');
+    if (!container || !poolId) return;
+
+    // تبدیل آیدی صندوق به عدد برای دیتابیس ✅
+    const cleanPoolId = poolId;
+
+    try {
+        // دریافت فیش‌های 'pending' همراه با نام عضو
+        const { data: txs, error } = await supabaseClient
+            .from('transactions')
+            .select('*, members(full_name)')
+            .eq('pool_id', cleanPoolId)
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (!txs || txs.length === 0) {
+            container.innerHTML = '<p class="text-center py-10 text-slate-400 text-[10px] font-black uppercase">هیچ فیش منتظری یافت نشد ✨</p>';
+            if (typeof updateTaskBadge === 'function') updateTaskBadge(cleanPoolId);
+            return;
+        }
+
+        container.innerHTML = txs.map(t => {
+            const date = new Date(t.created_at).toLocaleDateString('fa-IR-u-nu-latn');
+            const senderName = t.members ? t.members.full_name : 'عضو ناشناس';
+
+            return `
+            <div class="receipt-card mb-4 shadow-sm" onclick="this.classList.toggle('active')">
+                <div class="receipt-actions-overlay">
+                    <button onclick="event.stopPropagation(); updateStatus('${t.id}', 'rejected')" class="action-btn-circle bg-rose-500/20 text-rose-500"><i class="fas fa-times"></i></button>
+                    <a href="${t.receipt_url}" target="_blank" onclick="event.stopPropagation()" class="action-btn-circle bg-indigo-600 text-white"><i class="fas fa-eye"></i></a>
+                    <button onclick="event.stopPropagation(); updateStatus('${t.id}', 'approved')" class="action-btn-circle bg-emerald-500 text-white"><i class="fas fa-check"></i></button>
+                </div>
+                <div class="flex justify-between items-center h-full">
+                    <div class="text-left">
+                        <p class="text-[11px] font-black text-emerald-600">${Number(t.amount).toLocaleString()} ت</p>
+                        <p class="text-[8px] text-slate-400 font-bold mt-1">${date}</p>
+                    </div>
+                    <div class="text-right">
+                        <h5 class="text-xs font-[900] text-slate-800">${senderName}</h5>
+                        <p class="text-[7px] text-slate-400 mt-1 uppercase font-bold italic">Tap to verify</p>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        if (typeof updateTaskBadge === 'function') updateTaskBadge(cleanPoolId);
+
+    } catch (e) {
+        console.error("Critical Receipt Error:", e.message);
+        container.innerHTML = `<p class="text-red-500 text-center py-5 text-[9px]">خطا در لود فیش‌ها: ${e.message}</p>`;
+    }
+}
+
+
+/************************************************
+ * تابع بروزرسانی نشانگر اعلان (Red Dot) برای مدیر
+ ************************************************/
+window.updateTaskBadge = async function(poolId) {
+    // ۱. بررسی وجود المان دایره قرمز در منوی پایین
+    const badge = document.getElementById('tasks-badge');
+    if (!badge || !poolId) return;
+
+    try {
+        // ۲. شمارش فیش‌های 'pending' از دیتابیس
+        const { count, error } = await supabaseClient
+            .from('transactions')
+            .select('*', { count: 'exact', head: true })
+            .eq('pool_id', Number(poolId))
+            .eq('status', 'pending');
+
+        if (error) throw error;
+
+        // ۳. نمایش یا مخفی کردن دایره قرمز
+        if (count > 0) {
+            badge.innerText = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    } catch (e) {
+        console.warn("⚠️ مشکلی در آپدیت نشانگر فیش‌ها رخ داد:", e.message);
+    }
+};
+
+
+/************************************************
+ * تابع لود لیست اعضا با مدال‌های افتخار
+ ************************************************/
+async function loadAllMembers(poolId) {
+    try {
+        const { data: members, error } = await supabaseClient
+            .from('members')
+            .select('*')
+            .eq('pool_id', poolId);
+        
+        if (error) throw error;
+
+        // مرتب‌سازی (مدیر اول، بعد بر اساس نام)
+        const sorted = members.sort((a, b) => {
+            if (a.is_admin && !b.is_admin) return -1;
+            if (!a.is_admin && b.is_admin) return 1;
+            return a.full_name.localeCompare(b.full_name);
+        });
+        
+        allMembersData = sorted;
+
+        const container = document.getElementById('members-list');
+        if (!container) return;
+
+        container.innerHTML = sorted.map(m => {
+            // رنگ رندوم بر اساس حرف اول نام
+            const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-rose-500', 'bg-amber-500', 'bg-indigo-500'];
+            const randomColor = colors[Math.abs(m.full_name.charCodeAt(0)) % colors.length];
+            
+            // آواتار (عکس یا حرف اول)
+            const avatarContent = m.avatar_url ? 
+                `<img src="${m.avatar_url}" class="w-12 h-12 rounded-full object-cover">` : 
+                `<div class="w-12 h-12 ${m.is_admin ? 'bg-slate-900' : randomColor} rounded-full flex items-center justify-center text-white font-black">${m.is_admin ? '<i class="fas fa-crown text-yellow-400"></i>' : m.full_name.charAt(0)}</div>`;
+
+            // مدال‌های افتخار
+            const badgesHtml = window.generateMemberBadges ? generateMemberBadges(m) : '';
+
+            return `
+                <div onclick="openMemberProfile('${m.id}')" class="flex items-center gap-4 p-4 border-b border-slate-50 transition-all hover:bg-slate-50 active:bg-slate-100 ${m.is_admin ? 'bg-indigo-50/40' : ''}">
+                    ${avatarContent}
+                    <div class="flex-1 text-right">
+                        <div class="flex items-center gap-2">
+                            <h4 class="text-[13px] font-[900] text-slate-800">${m.full_name}</h4>
+                            ${m.is_admin ? '<span class="text-[7px] bg-slate-900 text-white px-1.5 py-0.5 rounded">مدیر</span>' : ''}
+                        </div>
+                        ${badgesHtml}
+                    </div>
+                    <i class="fas fa-chevron-left text-slate-200 text-[10px]"></i>
+                </div>`;
+        }).join('');
+
+    } catch (e) { 
+        console.error("Load Members Error:", e); 
+    }
+}
+
+/************************************************
+ * تابع جامع لود عملیات (با قفل هوشمند نوبت)
+ ************************************************/
+window.loadOpsTabContent = async function(poolId) {
+    const queueContainer = document.getElementById('loan-queue-list');
+    const debtorsContainer = document.getElementById('admin-debtors-list');
+    if (!queueContainer || !debtorsContainer) return;
+
+    try {
+        // ۱. دریافت اطلاعات زنده
+        const [mRes, tRes] = await Promise.all([
+            supabaseClient.from('members').select('*').eq('pool_id', poolId).eq('is_admin', false),
+            supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved')
+        ]);
+
+        const members = mRes.data || [];
+        const txs = tRes.data || [];
+
+        // ۲. محاسبات مالی تک‌تک اعضا
+        const processed = members.map(m => {
+            // کل واریزی (قسط)
+            const totalIn = txs.filter(t => t.member_id === m.id && t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
+            // کل دریافتی نوبتی
+            const totalOutMonthly = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
+            // کل دریافتی مساعده
+            const totalOutEmergency = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'emergency').reduce((s, a) => s + Number(a.amount), 0);
+
+            const monthlyDebt = Math.max(0, totalOutMonthly - totalIn);
+            const emergencyDebt = totalOutEmergency; // بدهی مساعده
+
+            // شرط حضور در صف: بدهی نوبتی نداشته باشد و تاریخ صلاحیت داشته باشد ✅
+            const isEligible = monthlyDebt <= 0 && m.eligible_at !== null;
+
+            return { ...m, monthlyDebt, emergencyDebt, isEligible };
+        });
+
+        // ۳. مدیریت کرکره "صف نوبت" (با دکمه قفل شونده) 👇
+        const readyList = processed.filter(m => m.isEligible).sort((a,b) => new Date(a.eligible_at) - new Date(b.eligible_at));
+        
+        queueContainer.innerHTML = readyList.length > 0 ? readyList.map((m, i) => {
+            const isFirst = (i === 0); // آیا این شخص نفر اول صف است؟
+
+            return `
+            <div class="bg-slate-50 p-4 rounded-2xl flex justify-between items-center border border-slate-100 mb-2 ${!isFirst ? 'opacity-60' : 'border-indigo-200 shadow-sm'}">
+                <div class="flex items-center gap-3">
+                    <span class="w-7 h-7 ${isFirst ? 'bg-indigo-600' : 'bg-slate-400'} text-white rounded-lg flex items-center justify-center font-black text-[10px]">${i+1}</span>
+                    <div class="text-right">
+                        <h5 class="text-xs font-black text-slate-800">${m.full_name}</h5>
+                        ${isFirst ? '<span class="text-[7px] text-indigo-500 font-bold animate-pulse">● نوبت پرداخت</span>' : ''}
+                    </div>
+                </div>
+                
+                <!-- اگر نفر اول نباشد، دکمه غیرفعال و کمرنگ می‌شود 👇 -->
+                <button 
+                    onclick="${isFirst ? `payStandardLoan('${m.id}', '${m.full_name}')` : ''}" 
+                    class="${isFirst ? 'bg-indigo-600 shadow-indigo-200 shadow-lg' : 'bg-slate-300 pointer-events-none'} text-white px-4 py-2 rounded-xl text-[9px] font-black transition-all">
+                    ${isFirst ? 'پرداخت وام' : 'در انتظار نوبت'}
+                </button>
+            </div>`;
+        }).join('') : '<p class="text-center py-6 text-slate-300 text-[9px]">کسی در صف انتظار نیست.</p>';
+
+        // ۴. مدیریت کرکره "لیست بدهکاران" 👇
+        const debtorList = processed.filter(m => m.monthlyDebt > 0 || m.emergencyDebt > 0);
+        
+        debtorsContainer.innerHTML = debtorList.length > 0 ? debtorList.map(m => {
+            const totalDebt = m.monthlyDebt + m.emergencyDebt;
+            return `
+            <div class="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm mb-4">
+                <div class="flex justify-between items-start mb-4">
+                    <div class="text-right">
+                        <h5 class="text-xs font-[900] text-slate-800">${m.full_name}</h5>
+                        <p class="text-[7px] text-slate-400 mt-1 uppercase font-bold tracking-widest">Active Debt</p>
+                    </div>
+                    <span class="bg-rose-500 text-white text-[10px] font-black px-3 py-1 rounded-xl">${totalDebt.toLocaleString()} ت</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    ${m.monthlyDebt > 0 ? `<div class="bg-indigo-50 p-2 rounded-xl text-center border border-indigo-100"><p class="text-[7px] text-indigo-500 font-black">وام نوبتی</p><p class="text-[9px] font-black text-indigo-800">${m.monthlyDebt.toLocaleString()}</p></div>` : '<div class="bg-slate-50 opacity-20 rounded-xl flex items-center justify-center"><i class="fas fa-check text-[8px]"></i></div>'}
+                    ${m.emergencyDebt > 0 ? `<div class="bg-amber-50 p-2 rounded-xl text-center border border-amber-100"><p class="text-[7px] text-amber-600 font-black">مساعده</p><p class="text-[9px] font-black text-amber-800">${m.emergencyDebt.toLocaleString()}</p></div>` : '<div class="bg-slate-50 opacity-20 rounded-xl flex items-center justify-center"><i class="fas fa-check text-[8px]"></i></div>'}
+                </div>
+            </div>`;
+        }).join('') : '<p class="text-center py-8 text-emerald-500 text-[9px] font-black italic">بدهکاری در سیستم نیست ✨</p>';
+
+    } catch (e) { console.error("Ops Sync Error:", e); }
+};
+
+/************************************************
+ * ۲. تابع پرداخت مساعده فوری (Emergency/Instant Loan)
+ * تایید درخواست‌های ثبت شده توسط اعضا
+ ************************************************/
+window.payEmergencyLoan = async function(loanId, amount, memberName, memberId) {
+    const poolId = sessionStorage.getItem('pool_id');
+
+    const result = await Swal.fire({
+        title: 'تایید و پرداخت مساعده',
+        text: `آیا از واریز مبلغ ${Number(amount).toLocaleString()} ت به حساب ${memberName} اطمینان دارید؟`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#10b981',
+        confirmButtonText: 'بله، واریز شود',
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+
+    if (result.isConfirmed) {
+        try {
+            Swal.fire({ title: 'در حال کسر از موجودی...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+            // ۱. ثبت تراکنش خروجی (Category: emergency)
+            const { error: txErr } = await supabaseClient.from('transactions').insert([{
+                pool_id: poolId,
+                member_id: memberId,
+                amount: Number(amount),
+                status: 'approved',
+                type: 'out',
+                category: 'emergency', // دسته‌بندی مساعده فوری
+                receipt_url: `مساعده: ${memberName}`
+            }]);
+
+            if (txErr) throw txErr;
+
+            // ۲. تغییر وضعیت درخواست در جدول وام‌ها
+            await supabaseClient.from('loans').update({ status: 'paid' }).eq('id', loanId);
+
+            // ۳. افزایش بدهی عضو (بر اساس ID) 👇
+            const { data: mData } = await supabaseClient.from('members').select('debt_target').eq('id', memberId).single();
+            
+            await supabaseClient.from('members').update({
+                debt_target: (Number(mData?.debt_target) || 0) + Number(amount)
+            }).eq('id', memberId);
+
+            await Swal.fire({ title: 'پرداخت شد ✅', text: 'مبلغ مساعده از موجودی صندوق کسر و در بدهی عضو ثبت شد.', icon: 'success' });
+            
+            // رفرش لیست‌ها
+            if (typeof loadAdminLoans === 'function') loadAdminLoans(poolId);
+            if (typeof loadOpsTabContent === 'function') loadOpsTabContent(poolId);
+            if (typeof calculateStats === 'function') calculateStats(poolId);
+
+        } catch (e) {
+            Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
+        }
+    }
+};
+
+/************************************************
+ * تابع لود اطلاعات صندوق در هدر
+ ************************************************/
+async function loadPoolHeaderInfo(poolId) {
+    try {
+        const { data: pool } = await supabaseClient
+            .from('pools')
+            .select('pool_code, created_at')  // 👈 pool_code نه code
+            .eq('id', poolId)
+            .single();
+
+        if (pool) {
+            // کد صندوق
+            const codeEl = document.getElementById('display-pool-code');
+            if (codeEl) codeEl.innerText = pool.pool_code || poolId;
+            
+            // تاریخ تاسیس
+            const dateEl = document.getElementById('display-init-date');
+            if (dateEl) {
+                const date = new Date(pool.created_at);
+                dateEl.innerText = date.toLocaleDateString('fa-IR');
+            }
+        }
+    } catch (e) {
+        console.log("Pool Header Error:", e.message);
+    }
+}

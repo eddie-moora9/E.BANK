@@ -8,6 +8,7 @@
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
@@ -34,6 +35,19 @@
         .btn-indigo { background: #4f46e5; transition: all 0.3s ease; }
         .btn-indigo:active { transform: scale(0.96); opacity: 0.9; }
         ::-webkit-scrollbar { display: none; }
+        .loader {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #FFF;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            animation: rotation 1s linear infinite;
+        }
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 
@@ -49,55 +63,69 @@
             <p class="text-[8px] text-slate-400 font-bold uppercase mt-1.5 tracking-[0.3em]">New Pool Deployment</p>
         </div>
 
-        <div class="space-y-3.5">
-            <!-- اطلاعات صندوق -->
+        <div class="space-y-4">
+            <!-- ۱. نام بانک -->
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Bank Name</label>
-                <input type="text" id="p-name" placeholder="نام بانک (مثلاً فامیلی مرادی)" 
-                    class="w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:bg-white focus:border-indigo-500 placeholder:text-slate-300">
-                <i class="fas fa-signature absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase tracking-widest">Bank Name</label>
+                <div class="relative">
+                    <input type="text" id="p-name" placeholder="نام بانک (مثلاً دوستانه)" 
+                        class="w-full p-3.5 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-indigo-500">
+                    <i class="fas fa-signature absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
+                </div>
             </div>
 
+            <!-- ۲. کد اختصاصی بانک -->
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Pool ID (English)</label>
-                <input type="text" id="p-code" placeholder="کد اختصاصی" 
-                    class="ltr-input w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:bg-white focus:border-indigo-500 placeholder:text-slate-300 uppercase">
-                <i class="fas fa-fingerprint absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase tracking-widest">Bank ID (English)</label>
+                <div class="relative">
+                    <input type="text" id="p-code" placeholder="A10 :کداختصاصی مثلاً" 
+                        oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase()"
+                        class="ltr-input w-full p-3.5 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-indigo-500 uppercase">
+                    <i class="fas fa-fingerprint absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
+                </div>
             </div>
 
             <div class="h-px bg-slate-100 w-full my-2"></div>
 
-            <!-- اطلاعات مدیر -->
+            <!-- ۳. نام مدیر -->
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Manager Name</label>
-                <input type="text" id="m-name" placeholder="نام و نام خانوادگی مدیر" 
-                    class="w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none">
-                <i class="fas fa-user-tie absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase tracking-widest">Manager Name</label>
+                <div class="relative">
+                    <input type="text" id="m-name" placeholder="نام و نام خانوادگی مدیر" 
+                        class="w-full p-3.5 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-indigo-500">
+                    <i class="fas fa-user-tie absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
+                </div>
             </div>
 
+            <!-- ۴. شماره موبایل -->
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Mobile</label>
-                <input type="tel" id="m-mobile" placeholder="شماره موبایل" 
-                    class="ltr-input w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none">
-                <i class="fas fa-phone-alt absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase tracking-widest">Mobile Number</label>
+                <div class="relative">
+                    <input type="tel" id="m-mobile" placeholder="شماره موبایل مدیر" 
+                        class="ltr-input w-full p-3.5 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-indigo-500">
+                    <i class="fas fa-phone-alt absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
+                </div>
             </div>
 
+            <!-- ۵. رمز عبور -->
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Password</label>
-                <input type="password" id="m-pass" placeholder="رمز عبور پنل مدیریت" 
-                    class="w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none">
-                <i class="fas fa-lock absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase tracking-widest">Master Password</label>
+                <div class="relative">
+                    <input type="password" id="m-pass" placeholder="رمز عبور پنل مدیریت" 
+                        class="w-full p-3.5 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-indigo-500">
+                    <i class="fas fa-lock absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
+                </div>
             </div>
-            
-            <button onclick="createNewPool()" id="create-btn" 
-                class="btn-indigo w-full text-white py-4 rounded-2xl font-black text-xs shadow-xl shadow-indigo-100 flex items-center justify-center gap-2 mt-2">
-                تایید و افتتاح بانک اختصاصی
-            </button>
-
-            <p class="text-center pt-2">
-                <a href="index.html" class="text-[9px] font-bold text-slate-400 hover:text-indigo-600 transition-colors">قبلاً ثبت‌نام کرده‌اید؟ ورود به سیستم</a>
-            </p>
         </div>
+            
+        <button onclick="createNewPool()" id="create-btn" 
+            class="btn-indigo w-full text-white py-4 rounded-2xl font-black text-xs shadow-xl shadow-indigo-100 flex items-center justify-center gap-2 mt-6">
+            تایید و افتتاح بانک اختصاصی
+        </button>
+
+        <p class="text-center pt-4">
+            <a href="index.html" class="text-[9px] font-bold text-slate-400 hover:text-indigo-600 transition-colors">قبلاً ثبت‌نام کرده‌اید؟ ورود به سیستم</a>
+        </p>
     </div>
 
     <div class="mt-8 text-center">
@@ -107,49 +135,172 @@
     </div>
 
     <script>
-        const SUPABASE_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
-        const SUPABASE_KEY = 'sb_publishable_ZqXeccdaSzZUivCwU38WcQ_m05uT4y6';
-        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+/* ==================================================
+   E.BANK CORE - SECURED SIGNUP LOGIC (V8.0)
+   ================================================== */
 
-        async function createNewPool() {
-            const pName = document.getElementById('p-name').value.trim();
-            const pCode = document.getElementById('p-code').value.trim().toUpperCase();
-            const mName = document.getElementById('m-name').value.trim();
-            const mMobile = document.getElementById('m-mobile').value.trim();
-            const mPass = document.getElementById('m-pass').value.trim();
-            const btn = document.getElementById('create-btn');
+// ۱. تنظیمات اتصال
+const SUPABASE_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxbnNibnB6bmt3a3d1a3pva2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDc4NjgsImV4cCI6MjA4MjEyMzg2OH0.dsqyFP37JyrfYDVwasNZW_Aid9ah0e6SxdnS8j8xV5s';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-            if(!pName || !pCode || !mName || !mMobile || !mPass) return alert("لطفاً تمام فیلدها را پر کنید ❌");
-            btn.disabled = true; btn.innerText = "در حال پردازش...";
+// ۲. تابع لودینگ (برای رفع اروری که داشتی) 👇
+function toggleLoading(btnId, isLoading, text) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.disabled = isLoading;
+    // تغییر متن دکمه به همراه آیکون چرخنده
+    btn.innerHTML = isLoading ? `<i class="fas fa-spinner fa-spin ml-2"></i> ${text}` : `تایید و افتتاح بانک اختصاصی`;
+}
 
-            try {
-                // ۱. ساخت صندوق
-                const { data: poolData, error: pErr } = await supabaseClient
-                    .from('pools')
-                    .insert([{ pool_name: pName, pool_code: pCode }])
-                    .select();
-                if (pErr) throw new Error("کد بانک تکراری است یا مشکلی در اتصال وجود دارد.");
-                
-                const newPoolId = poolData[0].id;
 
-                // ۲. تنظیمات اولیه
-                await supabaseClient.from('settings').insert([{ pool_id: newPoolId, base_amount: 2000000, won_amount: 2500000 }]);
+// ۳. تابع هش کردن رمز
+async function hashPassword(password) {
+    const msgBuffer = new TextEncoder().encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
-                // ۳. ثبت مدیر
-                await supabaseClient.from('members').insert([{ 
-                    pool_id: newPoolId, full_name: mName, mobile: mMobile, 
-                    password: mPass, is_admin: true, is_super_admin: false,
-                    total_shares: 1, won_shares: 0, has_won: false, credit_score: 100
-                }]);
+// ۴. ابزار نگهبان (Validation)
+const Validator = {
+    isMobile: (v) => /^09\d{9}$/.test(v),
+    isMinLen: (v, l) => v.trim().length >= l,
+    isPoolCode: (v) => /^[A-Z0-9]{3,}$/i.test(v)
+};
 
-                alert(`🎉 بانک "${pName}" با موفقیت تأسیس شد.`);
-                window.location.replace('./index.html'); // هدایت به صفحه ورود جدید
 
-            } catch (err) {
-                alert("🚨 خطا: " + err.message);
-                btn.disabled = false; btn.innerText = "تایید و افتتاح بانک اختصاصی";
-            }
-        }
+async function handleLogin() {
+    const pInput = document.getElementById('login-pool-code');
+    const mInput = document.getElementById('login-mobile');
+    const passInput = document.getElementById('login-password');
+
+    const pCode = pInput.value.trim().toUpperCase();
+    const mobile = mInput.value.trim().replace(/\s+/g, ''); // حذف فاصله
+    const password = passInput.value;
+
+    if (!pCode || !mobile || !password) {
+        return Swal.fire({ text: "لطفاً تمام فیلدها را پر کنید", icon: 'warning' });
+    }
+
+    toggleLoading('login-btn', true, 'در حال تایید اعتبار...');
+
+    try {
+        // ۱. بررسی وجود صندوق با این کد
+        const { data: pool } = await supabaseClient
+            .from('pools')
+            .select('id')
+            .eq('pool_code', pCode)
+            .maybeSingle();
+
+        if (!pool) throw new Error("کد بانک (Pool ID) اشتباه است! ❌");
+
+        // ۲. ساخت ایمیل فیک استاندارد
+        const fakeEmail = `${mobile}@ebank.com`;
+
+        // ۳. ورود رسمی به سیستم هویت (JWT)
+        const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+            email: fakeEmail,
+            password: password
+        });
+
+        if (authError) throw new Error("شماره موبایل یا رمز عبور اشتباه است ❌");
+
+        // ۴. دریافت پروفایل از جدول اعضا
+        const { data: profile, error: dbErr } = await supabaseClient
+            .from('members')
+            .select('*')
+            .eq('id', authData.user.id)
+            .single();
+
+        if (dbErr) throw new Error("پروفایل شما یافت نشد! ابتدا بانک را تأسیس کنید.");
+
+        // ۵. ذخیره نشست در حافظه موقت (Session)
+        sessionStorage.setItem('user_id', profile.id);
+        sessionStorage.setItem('pool_id', profile.pool_id);
+        sessionStorage.setItem('user_name', profile.full_name);
+        sessionStorage.setItem('is_admin', String(profile.is_admin));
+        localStorage.setItem('saved_pool_code', pCode);
+
+        Swal.fire({ title: 'خوش آمدید ✅', icon: 'success', timer: 1500, showConfirmButton: false });
+
+        // ۶. هدایت هوشمند بر اساس نقش
+        setTimeout(() => {
+            window.location.replace(profile.is_admin ? 'admin.html' : 'member.html');
+        }, 1500);
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا در ورود', text: e.message, icon: 'error' });
+    } finally {
+        toggleLoading('login-btn', false);
+    }
+}
+
+
+// ۵. تابع اصلی تأسیس بانک
+async function createNewPool() {
+    const pName = document.getElementById('p-name').value.trim();
+    const pCode = document.getElementById('p-code').value.trim().toUpperCase();
+    const mName = document.getElementById('m-name').value.trim();
+    const mMobile = document.getElementById('m-mobile').value.trim();
+    const mPass = document.getElementById('m-pass').value.trim();
+    const btn = document.getElementById('create-btn');
+
+    if(!pName || !pCode || !mName || !mMobile || !mPass) {
+        return Swal.fire({text:"تمام کادرها الزامی است", icon:'warning'});
+    }
+
+    toggleLoading('create-btn', true, 'در حال تأسیس امنیتی...');
+
+    try {
+        // ۱. پاکسازی شماره موبایل (حذف فاصله)
+        const cleanMobile = mMobile.replace(/\s+/g, '');
+        const fakeEmail = `${cleanMobile}@ebank.com`;
+
+        // ۲. ثبت‌نام در سیستم Auth سوپابیس
+        const { data: authData, error: authErr } = await supabaseClient.auth.signUp({
+            email: fakeEmail,
+            password: mPass
+        });
+
+        if (authErr) throw authErr;
+
+        // ۳. ساخت ردیف صندوق در جدول pools
+        const { data: poolData, error: pErr } = await supabaseClient
+            .from('pools')
+            .insert([{ pool_name: pName, pool_code: pCode, member_capacity: 10 }])
+            .select();
+
+        if (pErr) throw new Error("این کد بانک قبلاً رزرو شده است.");
+        const newPoolId = poolData[0].id;
+
+        // ۴. ثبت مدیر در جدول اعضا (وصل کردن به UUID سرور)
+        const { error: mErr } = await supabaseClient.from('members').insert([{ 
+            id: authData.user.id, 
+            pool_id: newPoolId, 
+            full_name: mName, 
+            mobile: cleanMobile, 
+            is_admin: true, 
+            is_super_admin: true,
+            credit_score: 100
+        }]);
+
+        if (mErr) throw mErr;
+
+        // ۵. تنظیمات اولیه مبالغ
+        await supabaseClient.from('settings').insert([{ pool_id: newPoolId, base_amount: 2000000, won_amount: 2500000 }]);
+
+        await Swal.fire({ title: 'بانک تأسیس شد! 🎊', text: 'تبریک، حالا می‌توانید لاگین کنید.', icon: 'success' });
+        window.location.replace('index.html');
+
+    } catch (err) {
+        Swal.fire({ title: 'خطا در تأسیس', text: err.message, icon: 'error' });
+    } finally {
+        toggleLoading('create-btn', false);
+    }
+}
+
+
     </script>
 </body>
 </html>

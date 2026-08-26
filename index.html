@@ -3,201 +3,281 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>E.BANK | ورود</title>
+    <title>E.BANK | ورود ایمن</title>
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    
-    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-    <script>
-      window.OneSignalDeferred = window.OneSignalDeferred || [];
-      OneSignalDeferred.push(function(OneSignal) {
-        OneSignal.init({ appId: "6235857d-565c-4223-bffa-af420f2cd45b" });
-      });
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
-        body { 
-            font-family: 'Vazirmatn', sans-serif; 
-            background: #fdfdfd;
-            background-image: radial-gradient(#e2e8f0 0.8px, transparent 0.8px);
-            background-size: 25px 25px;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            -webkit-tap-highlight-color: transparent;
-        }
-        .login-card {
-            background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(20px);
-            border: 1px solid #f1f5f9;
-            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.05);
-        }
+        body { font-family: 'Vazirmatn', sans-serif; background: #fdfdfd; background-image: radial-gradient(#e2e8f0 1.2px, transparent 1.2px); background-size: 26px 26px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 0; overflow-x: hidden; }
+        .login-card { background: rgba(255, 255, 255, 0.98); backdrop-filter: blur(15px); border: 1px solid #f1f5f9; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.05); }
         input { text-align: right !important; direction: rtl !important; }
         .ltr-input { direction: ltr !important; text-align: right !important; }
-        .btn-premium { background: #0f172a; transition: all 0.3s ease; }
-        .btn-premium:active { transform: scale(0.96); background: #000; }
-        @keyframes float { 0% { transform: translateY(0px) rotate(3deg); } 50% { transform: translateY(-5px) rotate(-3deg); } 100% { transform: translateY(0px) rotate(3deg); } }
-        .logo-animate { animation: float 4s ease-in-out infinite; }
-        #splash-screen { transition: opacity 0.7s ease; z-index: 2000; }
-        body.loading { overflow: hidden; height: 100vh; }
-        ::-webkit-scrollbar { display: none; }
+        .btn-tap:active { transform: scale(0.96); }
+        .loader { width: 18px; height: 18px; border: 2px solid #FFF; border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: rotation 1s linear infinite; }
+        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #splash-screen { transition: opacity 0.7s ease; z-index: 4000; position: fixed; inset: 0; background: #020617; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .glass-card { background: #1e293b !important; color: white !important; }
     </style>
+
+    <!-- ۱. اسکریپت اضطراری حذف اسپلش (حتی در صورت وجود ارور در کدهای دیگر اجرا می‌شود) -->
+    <script>
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                var s = document.getElementById('splash-screen');
+                if (s) {
+                    s.style.opacity = '0';
+                    setTimeout(function() { s.remove(); document.body.classList.remove('loading'); }, 700);
+                }
+            }, 2000);
+        });
+    </script>
 </head>
+<body class="p-6">
 
-<body class="loading p-4">
+    <div id="splash-screen">
+        <div class="w-20 h-20 bg-emerald-500 rounded-3xl flex items-center justify-center text-white shadow-2xl animate-pulse">
+            <i class="fas fa-wallet text-3xl"></i>
+        </div>
+        <h1 class="mt-6 text-2xl font-black text-white tracking-[0.2em]">E.BANK</h1>
+    </div>
 
-
-
-    <!-- ۲. کارت لاگین اصلی (گوشه‌ها اصلاح شد) -->
-    <div class="login-card w-full max-w-sm p-8 rounded-[2.5rem]">
-        
-        <!-- بخش لوگوی سبز رنگ که درخواست دادی -->
-        <div class="text-center mb-6">
-            <div class="logo-animate w-14 h-14 bg-emerald-500 rounded-2xl shadow-xl shadow-emerald-100 flex items-center justify-center text-white mx-auto mb-3">
-                <i class="fas fa-wallet text-2xl"></i>
+    <div class="login-card w-full max-w-sm p-8 rounded-[3.5rem] relative z-10">
+        <div class="text-center mb-10">
+            <div class="w-16 h-16 bg-emerald-500 rounded-2xl shadow-xl shadow-emerald-100 flex items-center justify-center text-white mx-auto mb-4">
+                <i class="fas fa-university text-2xl"></i>
             </div>
-            <h2 class="text-2xl font-[900] text-slate-900 tracking-tighter leading-none">E<span class="text-emerald-500">.</span>BANK</h2>
-            <p class="text-[7px] text-slate-400 font-bold uppercase mt-1.5 tracking-[0.3em]">Secure Access Portal</p>
+            <h2 class="text-2xl font-[900] text-slate-800 tracking-tighter">E<span id="secret-dot" class="text-emerald-600 cursor-pointer" style="display:inline-block; width:20px; text-align:center; user-select:none; -webkit-user-select:none; -moz-user-select:none; -webkit-touch-callout:none; touch-action:manipulation;">.</span>BANK</h2>
+            <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">Secure Access Portal</p>
         </div>
 
-        <div class="space-y-3.5">
+        <div class="space-y-4">
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Pool ID</label>
-                <input type="text" id="login-pool-code" placeholder="کد اختصاصی بانک" 
-                    class="ltr-input w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:bg-white focus:border-emerald-500 placeholder:text-slate-300 uppercase">
-                <i class="fas fa-key absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <input type="text" id="login-pool-code" placeholder="کد اختصاصی بانک" class="ltr-input w-full p-4 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-emerald-500 uppercase">
+                <i class="fas fa-fingerprint absolute right-4 top-4 text-slate-300 text-lg"></i>
             </div>
-
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Mobile Number</label>
-                <input type="tel" id="login-mobile" placeholder="شماره موبایل" 
-                    class="ltr-input w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:bg-white focus:border-emerald-500 placeholder:text-slate-300">
-                <i class="fas fa-phone-alt absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <input type="tel" id="login-mobile" placeholder="شماره موبایل" class="ltr-input w-full p-4 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-emerald-500">
+                <i class="fas fa-phone-alt absolute right-4 top-4 text-slate-300 text-lg"></i>
             </div>
-
             <div class="relative">
-                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase">Security Pin</label>
-                <input type="password" id="login-password" placeholder="رمز عبور" 
-                    class="w-full p-3.5 pr-10 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:bg-white focus:border-emerald-500 placeholder:text-slate-300">
-                <i class="fas fa-lock absolute right-4 top-8 text-slate-300 text-xs"></i>
+                <input type="password" id="login-password" placeholder="رمز عبور" class="w-full p-4 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-emerald-500">
+                <i class="fas fa-lock absolute right-4 top-4 text-slate-300 text-lg"></i>
             </div>
-            
-            <button onclick="handleLogin()" id="login-btn" 
-                class="btn-premium w-full text-white py-4 rounded-2xl font-black text-xs shadow-xl flex items-center justify-center gap-2 mt-2">
-                <span>تایید هویت و ورود</span>
-            </button>
-
-            <div class="flex flex-col gap-2 pt-4 text-center">
-                <button onclick="alert('با مدیر تماس بگیرید')" class="text-[8px] font-bold text-slate-400">فراموشی رمز عبور</button>
-                <div class="h-px bg-slate-100 w-1/3 mx-auto my-0.5"></div>
-                <button onclick="location.href='create_pool.html'" class="text-[10px] font-black text-emerald-600 flex items-center justify-center gap-1">
-                    تأسیس بانک جدید <i class="fas fa-plus-circle text-[9px]"></i>
-                </button>
+            <button onclick="handleLogin()" id="login-btn" class="btn-tap w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2 mt-2">تایید هویت و ورود</button>
+            <div class="pt-6 text-center border-t border-slate-100 space-y-4">
+                <button onclick="Swal.fire({text:'جهت بازیابی رمز با مدیر تماس بگیرید.', icon:'info'})" class="text-[10px] font-bold text-slate-400 block w-full">فراموشی رمز عبور؟</button>
+                <button onclick="location.href='create_pool.html'" class="text-[10px] font-black text-emerald-600 bg-emerald-50 px-6 py-2 rounded-full border border-emerald-100">تأسیس بانک جدید <i class="fas fa-plus-circle mr-1"></i></button>
             </div>
         </div>
     </div>
 
-    <!-- ۳. امضای هنری (مکان اصلاح شد) -->
-    <div class="mt-8 text-center">
-        <p class="text-[7px] font-black text-slate-300 uppercase tracking-[0.4em] opacity-80">
-            Designed & Developed by <span class="text-emerald-500">EDDIE</span>
+    <div class="w-full text-center mt-auto py-10 relative z-10">
+        <p class="text-[8px] font-black text-slate-300 uppercase tracking-[0.3em]">
+            Designed & Developed by <span id="secret-eddie" class="text-emerald-600 cursor-pointer" style="padding:5px; user-select:none; -webkit-user-select:none; -moz-user-select:none; -webkit-touch-callout:none; touch-action:manipulation;">EDDIE</span>
         </p>
     </div>
 
+    <!-- اسکریپت اصلی منطق برنامه -->
     <script>
-        const SUPABASE_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
-        const SUPABASE_KEY = 'sb_publishable_ZqXeccdaSzZUivCwU38WcQ_m05uT4y6';
-        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+/* ==================================================
+   E.BANK CORE - HYBRID PROTOCOL v10.0 (STABLE)
+   ================================================== */
+const S_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
+const S_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxbnNibnB6bmt3a3d1a3pva2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDc4NjgsImV4cCI6MjA4MjEyMzg2OH0.dsqyFP37JyrfYDVwasNZW_Aid9ah0e6SxdnS8j8xV5s';
 
-        document.addEventListener('DOMContentLoaded', () => {
-           setTimeout(() => {
-                const splash = document.getElementById('splash-screen');
-                if (splash) {
-                    splash.style.opacity = '0';
-                    setTimeout(() => { splash.remove(); document.body.classList.remove('loading'); }, 700);
+
+
+const supabaseClient = supabase.createClient(S_URL, S_KEY, {
+    auth: {
+        persistSession: true,
+        storageKey: 'ebank-auth-session', // یک نام ثابت و اختصاصی ✅
+        storage: window.localStorage, // استفاده از localStorage برای پایداری بیشتر در گوشی
+        autoRefreshToken: true,
+        detectSessionInUrl: false
+    }
+});
+
+// بخش اول: ورود و امنیت (خوانا)
+async function hashPassword(p) {
+    const b = new TextEncoder().encode(p);
+    const h = await crypto.subtle.digest('SHA-256', b);
+    return Array.from(new Uint8Array(h)).map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+async function openMasterLoginGate() {
+    const { value: p } = await Swal.fire({ title: 'COMMAND CENTER', input: 'password', confirmButtonColor: '#fbbf24', allowOutsideClick: false, customClass: { popup: 'rounded-[2.5rem] glass-card' } });
+    if (p) {
+        const { data: v } = await supabaseClient.rpc('verify_master_access', { input_password: p });
+        if (v === true) {
+            const { value: o } = await Swal.fire({ title: 'SECURITY CHALLENGE', text: 'فرمول ساعت را وارد کنید:', input: 'text', confirmButtonColor: '#10b981', allowOutsideClick: false, customClass: { popup: 'rounded-[2.5rem] glass-card' } });
+            const { data: v2 } = await supabaseClient.rpc('verify_2fa_access', { user_provided_code: o });
+            if (v2 === true) {
+                sessionStorage.setItem('is_super_admin', 'true');
+                window.location.href = 'super_admin.html';
+            } else { Swal.fire({ text: 'کد غلط است', icon: 'error' }); }
+        } else { Swal.fire({ text: 'رمز غلط است', icon: 'error' }); }
+    }
+}
+
+// بخش دوم: موتور درگاه مخفی (نامحسوس)
+let _α = 0, _β = 0, _γ = false, _τ1 = null, _τ2 = null, _Ω = 5;
+
+// لودینگ مستقل اسپلش
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        const s = document.getElementById('splash-screen');
+        if (s) { s.style.opacity = '0'; setTimeout(() => s.remove(), 700); }
+    }, 2000);
+});
+
+document.addEventListener('DOMContentLoaded', async () => {
+    // پیش‌بارگذاری عدد ثابت از دیتابیس
+    try {
+        const { data } = await supabaseClient.from('global_config').select('click_constant').eq('id', 1).maybeSingle();
+        if (data) _Ω = data.click_constant;
+    } catch(e) { _Ω = 5; }
+
+    const lp = localStorage.getItem('saved_pool_code');
+    if (lp && document.getElementById('login-pool-code')) document.getElementById('login-pool-code').value = lp;
+
+    const e = document.getElementById('secret-eddie');
+    const d = document.getElementById('secret-dot');
+
+    if (e && d) {
+        // فاز ۱: ضربه روی کلمه EDDIE
+        e.onclick = () => {
+            const val = document.getElementById('login-pool-code')?.value.trim();
+            const mt = Math.floor(new Date().getMinutes() / 10);
+            const key = (_Ω + mt).toString();
+
+            if (val !== key) { _α = 0; return; }
+            
+            _α++;
+            clearTimeout(_τ1);
+            if (_α > _Ω) { _α = 0; _γ = false; if (navigator.vibrate) navigator.vibrate(150); return; }
+
+            _τ1 = setTimeout(() => {
+                if (_α === _Ω) {
+                    _γ = true;
+                    if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
                 }
-            }, 2500);
-            const lastPool = localStorage.getItem('saved_pool_code');
-            if (lastPool) document.getElementById('login-pool-code').value = lastPool;
+            }, 350);
+        };
+
+        // فاز ۲: ضربه روی نقطه لوگو
+        d.onclick = () => {
+            if (!_γ) return;
+            _β++;
+            clearTimeout(_τ2);
+            const mt = Math.floor(new Date().getMinutes() / 10);
+            const target = _Ω + mt;
+
+            if (_β > target) { _α = 0; _β = 0; _γ = false; if (navigator.vibrate) navigator.vibrate(150); return; }
+
+            _τ2 = setTimeout(() => {
+                if (_β === target) {
+                    _α = 0; _β = 0; _γ = false;
+                    const c = document.getElementById('login-pool-code');
+                    if (c) c.value = '';
+                    if (navigator.vibrate) navigator.vibrate(200);
+                    openMasterLoginGate();
+                }
+            }, 350);
+        };
+    }
+});
+
+// بخش سوم: ورود اعضا
+async function handleLogin() {
+    // ۱. دسترسی به المان‌ها
+    const pI = document.getElementById('login-pool-code');
+    const mI = document.getElementById('login-mobile');
+    const psI = document.getElementById('login-password');
+    const btn = document.getElementById('login-btn');
+
+    if(!pI || !mI || !psI) return;
+
+    const p = pI.value.trim().toUpperCase();
+    const m = mI.value.trim().replace(/\s+/g, ''); // حذف فاصله‌های احتمالی
+    const ps = psI.value;
+
+    // ۲. بررسی خالی نبودن فیلدها
+    if(!p || !m || !ps) {
+        return Swal.fire({ text: "لطفاً تمام فیلدها را پر کنید ❌", icon: 'warning', confirmButtonColor: '#10b981' });
+    }
+
+    // ۳. فعال‌سازی لودینگ
+    btn.disabled = true; 
+    btn.innerHTML = '<span class="loader"></span> در حال تایید...';
+
+    try {
+        // ۴. استعلام وجود صندوق
+        const { data: pD, error: pErr } = await supabaseClient.from('pools').select('id').eq('pool_code', p).maybeSingle();
+        if(pErr || !pD) throw new Error("کد بانک (Pool ID) یافت نشد! ❌");
+
+        // ۵. ورود رسمی به سیستم هویت سوپابیس (JWT)
+        const { data: u, error: authError } = await supabaseClient.auth.signInWithPassword({
+            email: `${m}@ebank.com`,
+            password: ps
         });
 
-       async function handleLogin() {
-    const poolCode = document.getElementById('login-pool-code').value.trim().toUpperCase();
-    const mobile = document.getElementById('login-mobile').value.trim();
-    const password = document.getElementById('login-password').value;
-    const btn = document.getElementById('login-btn');
-    
-    if (!poolCode || !mobile || !password) return alert("لطفاً تمام کادرهای امنیتی را پر کنید ❌");
-    btn.innerText = "در حال تایید اعتبار..."; 
-    btn.disabled = true;
-    
-    try {
-        // ۱. پیدا کردن صندوق
-        const { data: pool, error: pErr } = await supabaseClient
-            .from('pools')
-            .select('id')
-            .eq('pool_code', poolCode)
-            .maybeSingle();
-        
-        if (pErr) throw pErr;
-        if (!pool) {
-            btn.disabled = false; btn.innerText = "تایید هویت و ورود";
-            return alert("❌ کد بانک (Pool ID) اشتباه است!");
-        }
-        
-        // ۲. پیدا کردن عضو
-        const { data: user, error: uErr } = await supabaseClient
+        if (authError) throw new Error("شماره موبایل یا رمز عبور اشتباه است ❌");
+
+        // ۶. دریافت پروفایل کامل عضو از جدول دیتابیس
+        const { data: prof, error: dbError } = await supabaseClient
             .from('members')
             .select('*')
-            .eq('pool_id', pool.id)
-            .eq('mobile', mobile)
-            .eq('password', password)
-            .maybeSingle();
-        
-        if (uErr) throw uErr;
-        
-        if (!user) {
-            btn.disabled = false; btn.innerText = "تایید هویت و ورود";
-            return alert("❌ شماره موبایل یا رمز عبور اشتباه است!");
-        }
-        
-        // ۳. مدیریت حافظه هوشمند (پاکسازی و ذخیره دوگانه)
-        localStorage.clear(); 
-        sessionStorage.clear();
+            .eq('id', u.user.id)
+            .single();
 
-        // الف) ذخیره در Session (برای امنیت جابجایی بین صفحات)
-        sessionStorage.setItem('user_id', user.id);
-        sessionStorage.setItem('pool_id', user.pool_id);
-        sessionStorage.setItem('user_name', user.full_name);
-        sessionStorage.setItem('is_admin', String(user.is_admin));
-        sessionStorage.setItem('is_super_admin', String(user.is_super_admin));
+        if (dbError || !prof) throw new Error("پروفایل کاربری یافت نشد! ❌");
 
-        // ب) ذخیره در Local (برای شناسایی دکمه شبح و پایداری)
-        localStorage.setItem('user_id', user.id);
-        localStorage.setItem('pool_id', user.pool_id);
-        localStorage.setItem('saved_pool_code', poolCode);
+        // ۷. ثبت دقیق اطلاعات در حافظه موقت (Session Storage) 👇
+        sessionStorage.clear(); // پاکسازی نشست‌های قبلی
+        sessionStorage.setItem('user_id', prof.id);
+        sessionStorage.setItem('pool_id', prof.pool_id);
+        sessionStorage.setItem('user_name', prof.full_name); // برای نمایش نام در هدر ✅
+        sessionStorage.setItem('is_admin', String(prof.is_admin));
+        sessionStorage.setItem('is_super_admin', String(prof.is_super_admin));
         
-        // تایید نهایی وضعیت سوپر ادمین
-        const isSuper = (user.is_super_admin === true || mobile === '09120612550') ? 'true' : 'false';
-        localStorage.setItem('is_super_admin', isSuper);
-        
-        // ۴. هدایت هوشمند
-        alert(`خوش آمدید ${user.full_name} ✅`);
-        if (user.is_admin === true) {
-            window.location.replace('admin.html');
-        } else {
-            window.location.replace('member.html');
-        }
-        
+        // ذخیره کد بانک برای ورودهای بعدی
+        localStorage.setItem('saved_pool_code', p);
+
+        // ۸. نمایش پیام موفقیت شیک
+        Swal.fire({
+            title: 'ورود موفقیت‌آمیز ✅',
+            text: `خوش آمدید ${prof.full_name}`,
+            icon: 'success',
+            showConfirmButton: false,
+            timer: 1200,
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+
+        // ۹. انتقال هوشمند با وقفه ایمنی (رفع مشکل پرش به لاگین) 👇
+        setTimeout(() => {
+            if (prof.is_admin === true) {
+                window.location.replace('admin.html');
+            } else {
+                window.location.replace('member.html');
+            }
+        }, 150); // این ۱۵۰ میلی‌ثانیه حیاتی است!
+
     } catch (e) {
-        alert("خطا در برقراری ارتباط: " + e.message);
-        btn.disabled = false;
-        btn.innerText = "تلاش مجدد";
+        // مدیریت خطاها
+        console.error("Login Error:", e.message);
+        Swal.fire({ 
+            title: 'توقف ورود', 
+            text: e.message, 
+            icon: 'error', 
+            confirmButtonColor: '#ef4444',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+        btn.disabled = false; 
+        btn.innerText = 'تایید هویت و ورود';
     }
 }
     </script>
