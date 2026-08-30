@@ -54,11 +54,11 @@ async function testPoolInfo() {
  ************************************************/
 window.generateMemberBadges = function(member) {
     let html = '';
-    const score = member.credit_score || 100;
+    const score = member.coins || 0;
     
     // الماس خوش‌حساب
     if (score >= 100) {
-        html += `<div class="badge-icon bg-cyan-500" title="الماس خوش‌حسابی"><i class="fas fa-gem"></i></div>`;
+        html += `<div class="badge-icon bg-cyan-500" title="الماس خوش‌حسابی (${score} سکه)"><i class="fas fa-gem"></i></div>`;
     }
     
     // همیار (بخشنده نوبت)
@@ -75,8 +75,8 @@ window.generateMemberBadges = function(member) {
         }
     }
 
-    // هشدار تسویه
-    if (score < 40) {
+    // هشدار تسویه — بر اساس بدهکاربودن واقعی این ماه، نه سکه (سکه ربطی به بدهی جاری نداره)
+    if (member.debt_warning_msg) {
         html += `<div class="badge-icon bg-rose-500 animate-pulse" title="هشدار تسویه"><i class="fas fa-exclamation-triangle"></i></div>`;
     }
 
@@ -225,6 +225,8 @@ if (sectionId === 'admin-ops-sec') {
     const pId = sessionStorage.getItem('pool_id');
     loadPendingReceipts(pId);   // لود فیش‌ها
     loadAdminLoans(pId);        // لود درخواست‌های مساعده 👈 اضافه شد
+    loadCoinRequests(pId);       // لود درخواست‌های مساعده‌ی سکه‌ای
+    loadTransactionLog(pId);    // لود لاگ تراکنش‌ها
     loadOpsTabContent(pId);     // لود صف نوبت و بدهکاران
 }
 
@@ -321,6 +323,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             loadAllMembers(_PID);
             loadPendingReceipts(_PID);
             loadAdminLoans(_PID);
+            loadCoinRequests(_PID);
+            loadTransactionLog(_PID);
             loadLoanQueue(_PID);
             loadAdminProjects(_PID);
             loadCurrentConfig(_PID);
@@ -364,11 +368,20 @@ async function calculateStats(poolId) {
         if (error) throw error;
 
         let totalIn = 0, totalOut = 0, totalInvestTarget = 0, actualCapitalSpent = 0, totalProfitIn = 0, totalProfitDist = 0;
+        let charityIn = 0, charityOut = 0;
 
         if (txs) {
             txs.forEach(t => {
                 const val = Number(t.amount || 0);
                 const inv = Number(t.invest_val || 0);
+
+                // خیریه کاملاً جدا از صندوق اصلیه، وارد محاسبه‌ی mainFund نمیشه
+                if (t.category === 'charity') {
+                    if (t.type === 'in') charityIn += val;
+                    else if (t.type === 'out') charityOut += val;
+                    return;
+                }
+
                 totalInvestTarget += inv;
 
                 if (t.type === 'in') totalIn += val;
@@ -382,7 +395,8 @@ async function calculateStats(poolId) {
         const mainFund = (totalIn - totalInvestTarget) - totalOut;
         const investFund = totalInvestTarget - actualCapitalSpent;
         const profitFund = totalProfitIn - totalProfitDist;
-        const totalAssets = mainFund + investFund + profitFund;
+        const charityFund = charityIn - charityOut;
+        const totalAssets = mainFund + investFund + profitFund; // خیریه عمداً جزو دارایی صندوق حساب نمیشه
 
         // نمایش در UI
         const updateUI = (id, val) => { if (document.getElementById(id)) document.getElementById(id).innerText = Math.floor(val).toLocaleString() + " تومان"; };
@@ -390,6 +404,7 @@ async function calculateStats(poolId) {
         updateUI('main-fund-balance', mainFund);
         updateUI('invest-fund-balance', investFund);
         updateUI('profit-fund-balance', profitFund);
+        updateUI('charity-fund-balance', charityFund);
 
     } catch (e) { console.error("Stats Calc Error:", e.message); }
 }
@@ -412,7 +427,7 @@ window.updateStatus = async function(id, newStatus) {
 
             const { data: set } = await supabaseClient
                 .from('settings')
-                .select('investment_percent')
+                .select('investment_percent, coin_per_day, coin_window_days, coin_charity_rate')
                 .eq('pool_id', myPoolId)
                 .maybeSingle();
 
@@ -434,7 +449,7 @@ window.updateStatus = async function(id, newStatus) {
                     .eq('status', 'approved');
 
                 const totalIn = allTxs
-                    .filter(t => t.type === 'in')
+                    .filter(t => t.type === 'in' && t.category === 'monthly')
                     .reduce((s, a) => s + Number(a.amount), 0);
 
                 const totalOutMonthly = allTxs
@@ -448,18 +463,43 @@ window.updateStatus = async function(id, newStatus) {
                     .eq('id', tx.member_id)
                     .single();
 
-                const day = new Date(tx.created_at).getDate();
-                let newScore = (Number(mem.credit_score) || 100) + (day <= 10 ? 2 : -10);
-                newScore = Math.max(0, Math.min(100, newScore));
+                const currentCoins = Number(mem.coins) || 0;
+                let rawChange;
 
-                // ۵. بررسی بازگشت به صف 👇
+                if (tx.category === 'charity') {
+                    // خیریه: سکه‌ی نسبت به مبلغ، بدون ارتباط با روز پرداخت
+                    const rate = Number(set?.coin_charity_rate) || 10000;
+                    rawChange = Math.floor(Number(tx.amount) / rate);
+                } else {
+                    // ۴. سیستم سکه (جایگزین امتیاز ۰-۱۰۰ قدیمی)
+                    // مبنا: تاریخ ثبت فیش توسط عضو (100% طبق تایید خودت)
+                    // فاصله از نزدیک‌ترین یکم ماه (این ماه یا ماه بعد) رو حساب می‌کنیم
+                    // تا پرداخت آخر ماه هم به‌درستی «زودتر از موعد» شناخته بشه
+                    const txDate = new Date(tx.created_at);
+                    const thisMonthFirst = new Date(txDate.getFullYear(), txDate.getMonth(), 1);
+                    const nextMonthFirst = new Date(txDate.getFullYear(), txDate.getMonth() + 1, 1);
+                    const diffToThis = Math.round((txDate - thisMonthFirst) / 86400000);   // 0..30
+                    const diffToNext = Math.round((txDate - nextMonthFirst) / 86400000);   // منفی = زودتر از ماه بعد
+                    const offset = Math.abs(diffToNext) < Math.abs(diffToThis) ? diffToNext : diffToThis;
+
+                    const winDays = Number(set?.coin_window_days) || 10;
+                    const perDay = Number(set?.coin_per_day) || 2;
+                    const half = Math.floor(winDays / 2);
+                    const peak = perDay * winDays;
+
+                    rawChange = offset <= -half ? peak : (peak - perDay * (offset + half));
+                }
+
+                const newCoins = Math.max(0, currentCoins + rawChange);
+
+                // ۵. آپدیت نمره خوش‌حسابی
                 let memberUpdateData = { 
-                    credit_score: newScore,
+                    coins: newCoins,
                     debt_warning_msg: null 
                 };
 
-                // 🔥 شرط: اگر بدهی نوبتی تسویه شد
-                if (totalIn >= totalOutMonthly) {
+                // 🔥 شرط: اگر بدهی نوبتی تسویه شد (فقط برای واریزی ماهانه، نه خیریه)
+                if (tx.category === 'monthly' && totalIn >= totalOutMonthly) {
                     // عضو واجد شرایط میشه و میره ته صف
                     memberUpdateData.eligible_at = new Date().toISOString();
                     console.log(`✅ ${mem.full_name} تسویه کرد و وارد صف شد.`);
@@ -553,6 +593,11 @@ window.updateMember = async function() {
             showConfirmButton: false,
             customClass: { popup: 'rounded-[2rem]' }
         });
+        
+        const shares = parseInt(document.getElementById('edit-member-shares').value);
+if (isNaN(shares) || shares < 1) {
+    return Swal.fire({text: "تعداد سهم باید حداقل ۱ باشد", icon:'warning'});
+}
 
         // بستن مودال و رفرش لیست اعضا بدون رفرش کل صفحه
         document.getElementById('edit-modal').classList.add('hidden');
@@ -574,26 +619,31 @@ window.updateMember = async function() {
 window.handleDeleteWithSettlement = async function() {
     const m = selectedMemberForReport;
     const balance = m.finalBalance || 0;
-    const settleAmt = document.getElementById('settle-amount').value;
-
-    if (!settleAmt) {
-        return Swal.fire({ text: "لطفاً مبلغ تسویه نهایی را وارد کنید (حتی عدد 0)", icon: 'warning' });
-    }
+    const absBalance = Math.abs(balance);
 
     // پیام تایید هوشمند بر اساس تراز
     let warningText = "";
-    if (balance > 0) warningText = `عضو مبلغ ${balance.toLocaleString()} ت پس‌انداز دارد. آیا مطمئنید که تسویه انجام شده و می‌خواهید او را حذف کنید؟`;
-    else if (balance < 0) warningText = `عضو مبلغ ${Math.abs(balance).toLocaleString()} ت بدهکار است. آیا تایید می‌کنید که این بدهی را وصول کرده‌اید؟`;
+    if (balance > 0) warningText = `عضو مبلغ <b>${absBalance.toLocaleString()} ت</b> پس‌انداز دارد. آیا مطمئنید که تسویه انجام شده و می‌خواهید او را حذف کنید؟`;
+    else if (balance < 0) warningText = `عضو مبلغ <b>${absBalance.toLocaleString()} ت</b> بدهکار است. آیا تایید می‌کنید که این بدهی را وصول کرده‌اید؟`;
     else warningText = `حساب عضو صفر است. آیا از حذف نهایی اطمینان دارید؟`;
 
     const result = await Swal.fire({
         title: 'تایید تسویه و حذف',
-        text: warningText,
+        html: `<p style="font-size:12px; color:#475569; line-height:1.9;">${warningText}</p>` +
+              (absBalance > 0 ? `<p style="font-size:9px; color:#94a3b8; margin-top:8px;">برای تایید، همین مبلغ را در کادر زیر وارد کنید</p>` : ''),
         icon: 'warning',
+        input: absBalance > 0 ? 'number' : undefined,
+        inputPlaceholder: absBalance > 0 ? `مثلاً ${absBalance}` : undefined,
         showCancelButton: true,
         confirmButtonColor: '#ef4444',
         confirmButtonText: 'بله، تسویه شد و حذف کن',
-        cancelButtonText: 'انصراف'
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem]' },
+        inputValidator: (value) => {
+            if (absBalance > 0 && Number(value) !== absBalance) {
+                return 'مبلغ واردشده با تراز محاسبه‌شده مطابقت ندارد ❌';
+            }
+        }
     });
 
     if (result.isConfirmed) {
@@ -604,12 +654,13 @@ window.handleDeleteWithSettlement = async function() {
 
             // ۱. ثبت تراکنش تسویه برای اصلاح موجودی کل صندوق 👇
             // اگر بستانکار بود، از صندوق کم می‌شود. اگر بدهکار بود، به صندوق اضافه می‌شود.
-            if (Number(settleAmt) > 0) {
+            if (absBalance > 0) {
                 await supabaseClient.from('transactions').insert([{
                     pool_id: poolId,
-                    amount: Number(settleAmt),
+                    amount: absBalance,
                     status: 'approved',
                     type: balance > 0 ? 'out' : 'in', // اگر پس‌اندازش را پس دادیم 'out'، اگر بدهی‌اش را گرفتیم 'in'
+                    category: 'monthly',
                     receipt_url: `تسویه نهایی با عضو حذف شده: ${m.full_name}`
                 }]);
             }
@@ -652,6 +703,7 @@ async function loadAdminLoans(poolId) {
 
         if (!loans || loans.length === 0) {
             container.innerHTML = '<p class="text-center py-5 text-slate-400 text-[10px]">درخواست مساعده‌ای موجود نیست.</p>';
+            updateAccordionDot('dot-ops-loans', 0);
             return;
         }
 
@@ -682,8 +734,197 @@ async function loadAdminLoans(poolId) {
                 </div>
             </div>`).join('');
 
+        updateAccordionDot('dot-ops-loans', loans.length);
+
     } catch (e) { console.error("Error loading admin loans:", e); }
 }
+
+/************************************************
+ * درخواست‌های مساعده‌ی سکه‌ای (جدا از loans رأی‌گیری‌دار)
+ ************************************************/
+async function loadCoinRequests(poolId) {
+    const container = document.getElementById('admin-coin-requests-list');
+    if (!container || !poolId) return;
+
+    try {
+        const { data: reqs, error } = await supabaseClient
+            .from('coin_requests')
+            .select('*')
+            .eq('pool_id', poolId)
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (!reqs || reqs.length === 0) {
+            container.innerHTML = '<p class="text-center py-5 text-slate-400 text-[10px]">درخواست مساعده‌ی سکه‌ای موجود نیست.</p>';
+            updateAccordionDot('dot-ops-coins', 0);
+            return;
+        }
+
+        container.innerHTML = reqs.map(r => `
+            <div class="bg-slate-50 p-5 rounded-[2rem] border border-slate-100 mb-4 shadow-sm text-right">
+                <div class="flex justify-between items-start mb-3">
+                    <h5 class="text-xs font-black text-slate-800">${escapeHtml(r.requester_name)}</h5>
+                    <span class="text-[10px] font-black text-yellow-600">${Number(r.amount).toLocaleString()} ت</span>
+                </div>
+                <p class="text-[9px] text-slate-500 mb-4">با ${r.coins_requested} سکه</p>
+                <div class="flex gap-2">
+                    <button class="js-approve-coin flex-1 bg-emerald-500 text-white py-3 rounded-2xl font-black text-[9px] shadow-lg active:scale-95" data-id="${r.id}">
+                        تایید و واریز
+                    </button>
+                    <button class="js-reject-coin px-4 bg-white text-rose-500 border border-rose-100 py-3 rounded-2xl font-black text-[9px] active:scale-95" data-id="${r.id}">
+                        رد
+                    </button>
+                </div>
+            </div>`).join('');
+
+        container.querySelectorAll('.js-approve-coin').forEach(btn => {
+            btn.onclick = () => decideCoinRequest(btn.dataset.id, true);
+        });
+        container.querySelectorAll('.js-reject-coin').forEach(btn => {
+            btn.onclick = () => decideCoinRequest(btn.dataset.id, false);
+        });
+
+        updateAccordionDot('dot-ops-coins', reqs.length);
+
+    } catch (e) { console.error("Error loading coin requests:", e); }
+}
+
+/************************************************
+ * پنل‌های کشویی عمومی (افتتاح پروژه، برداشت خیریه و ...)
+ * با کلیک روی دکمه/کارت باز میشن، با کلیک بیرون بسته میشن
+ ************************************************/
+function updateAccordionDot(dotId, count) {
+    const dot = document.getElementById(dotId);
+    if (!dot) return;
+    dot.classList.toggle('hidden', !(count > 0));
+}
+
+function toggleCollapsiblePanel(panelId, event) {
+    if (event) event.stopPropagation();
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const wasHidden = panel.classList.contains('hidden');
+    document.querySelectorAll('.js-collapsible-panel').forEach(p => p.classList.add('hidden'));
+    if (wasHidden) panel.classList.remove('hidden');
+}
+
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('.js-collapsible-panel:not(.hidden)').forEach(panel => {
+        if (!panel.contains(e.target)) panel.classList.add('hidden');
+    });
+});
+
+function escapeHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+/************************************************
+ * لاگ کامل و شفاف تراکنش‌ها — هر ورود/خروجی از هر صندوق
+ ************************************************/
+function txLabel(t) {
+    const categoryLabels = { monthly: 'قسط ماهانه', emergency: 'مساعده‌ی رأی‌گیری', charity: 'خیریه', coin_assistance: 'مساعده‌ی سکه‌ای' };
+    const typeLabels = { in: 'واریز', out: 'برداشت', capital_spend: 'خرید دارایی پروژه', profit: 'ثبت سود', distribution: 'توزیع سود' };
+    if (t.type === 'in' || t.type === 'out') {
+        return `${typeLabels[t.type]} ${categoryLabels[t.category] || 'عمومی'}`;
+    }
+    return typeLabels[t.type] || t.type;
+}
+
+let _txLogCache = [];
+
+async function loadTransactionLog(poolId) {
+    const container = document.getElementById('admin-transactions-log');
+    if (!container || !poolId) return;
+
+    try {
+        const { data: txs, error } = await supabaseClient
+            .from('transactions')
+            .select('*, members(full_name)')
+            .eq('pool_id', poolId)
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+        if (error) throw error;
+
+        _txLogCache = txs || [];
+        renderTransactionLog();
+
+    } catch (e) { console.error("Error loading transaction log:", e); }
+}
+
+function renderTransactionLog() {
+    const container = document.getElementById('admin-transactions-log');
+    if (!container) return;
+
+    const searchTerm = (document.getElementById('tx-log-search')?.value || '').trim().toLowerCase();
+    const typeFilter = document.getElementById('tx-log-type-filter')?.value || 'all';
+
+    let txs = _txLogCache;
+    if (typeFilter !== 'all') txs = txs.filter(t => t.type === typeFilter);
+    if (searchTerm) txs = txs.filter(t => (t.members?.full_name || '').toLowerCase().includes(searchTerm));
+
+    if (txs.length === 0) {
+        container.innerHTML = '<p class="text-center py-5 text-slate-400 text-[10px]">تراکنشی با این فیلتر پیدا نشد.</p>';
+        return;
+    }
+
+    container.innerHTML = `<p class="text-[8px] text-slate-400 text-center mb-2">${txs.length} تراکنش (از ۱۰۰ تای اخیر)</p>` + txs.map(t => {
+            const isCredit = (t.type === 'in' || t.type === 'profit');
+            const colorClass = isCredit ? 'text-emerald-600' : 'text-rose-600';
+            const sign = isCredit ? '+' : '−';
+            const date = new Date(t.created_at).toLocaleDateString('fa-IR-u-nu-latn');
+            const who = t.members ? t.members.full_name : (t.category === 'charity' ? 'صندوق خیریه' : 'ستاد صندوق');
+            const desc = t.receipt_url || '';
+            const isLink = /^https?:\/\//.test(desc);
+            const statusBadge = t.status !== 'approved'
+                ? `<span class="text-[7px] font-black px-2 py-1 rounded-full ${t.status === 'pending' ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-400'}">${t.status === 'pending' ? 'در انتظار' : 'رد شده'}</span>`
+                : '';
+
+            return `
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex justify-between items-center gap-3">
+                    <div class="text-right flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <p class="text-[10px] font-black text-slate-800">${escapeHtml(txLabel(t))}</p>
+                            ${statusBadge}
+                        </div>
+                        <p class="text-[8px] text-slate-400 mt-1">${escapeHtml(who)} · ${date}</p>
+                        ${desc && !isLink ? `<p class="text-[8px] text-slate-500 mt-1">${escapeHtml(desc)}</p>` : ''}
+                        ${isLink ? `<a href="${desc}" target="_blank" class="text-[8px] text-indigo-500 underline mt-1 inline-block">مشاهده فیش</a>` : ''}
+                    </div>
+                    <div class="text-left shrink-0">
+                        <p class="text-xs font-black ${colorClass}">${sign}${Number(t.amount).toLocaleString()}</p>
+                    </div>
+                </div>`;
+        }).join('');
+}
+
+window.decideCoinRequest = async function(requestId, approve) {
+    const poolId = sessionStorage.getItem('pool_id');
+    try {
+        const { data: ok, error } = await supabaseClient.rpc('decide_coin_request', {
+            request_id: Number(requestId),
+            approve: approve
+        });
+        if (error) throw error;
+        if (!ok) throw new Error('این درخواست دیگر معتبر نیست یا اجازه‌ی دسترسی ندارید');
+
+        Swal.fire({
+            title: approve ? 'مساعده واریز شد ✅' : 'درخواست رد شد',
+            icon: approve ? 'success' : 'info',
+            timer: 1500,
+            showConfirmButton: false
+        });
+        loadCoinRequests(poolId);
+        loadTransactionLog(poolId);
+        loadAllMembers(poolId);
+    } catch (e) {
+        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
+    }
+};
 
 
 /************************************************
@@ -765,12 +1006,62 @@ window.createNewProject = async function() {
         capitalInput.value = '';
         calculateStats(poolId); 
         loadAdminProjects(poolId);
+        if (typeof loadTransactionLog === 'function') loadTransactionLog(poolId);
 
     } catch (e) {
         Swal.fire({ title: 'خطا در ثبت', text: e.message, icon: 'error' });
     }
 };
 
+/************************************************
+ * برداشت مدیر از صندوق خیریه (مبلغ + توضیح اجباری)
+ ************************************************/
+window.withdrawFromCharity = async function() {
+    const poolId = sessionStorage.getItem('pool_id');
+    const amountInput = document.getElementById('charity-withdraw-amount');
+    const descInput = document.getElementById('charity-withdraw-desc');
+    if (!amountInput || !descInput) return;
+
+    const amount = Number(amountInput.value);
+    const desc = descInput.value.trim();
+
+    if (!amount || amount <= 0) return Swal.fire({ text: "مبلغ برداشت را وارد کنید ❌", icon: 'warning' });
+    if (!desc) return Swal.fire({ text: "توضیح برداشت (بابت چی/برای کی) الزامی است ❌", icon: 'warning' });
+
+    const confirmResult = await Swal.fire({
+        title: 'تایید برداشت از خیریه',
+        html: `آیا از برداشت <b class="text-rose-600">${amount.toLocaleString()} ت</b> از «صندوق خیریه» بابت «${desc}» مطمئنید؟`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'بله، برداشت شود',
+        cancelButtonText: 'انصراف',
+        confirmButtonColor: '#e11d48',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+    if (!confirmResult.isConfirmed) return;
+
+    try {
+        const { error } = await supabaseClient.from('transactions').insert([{
+            pool_id: poolId,
+            amount: amount,
+            status: 'approved',
+            type: 'out',
+            category: 'charity',
+            receipt_url: desc
+        }]);
+        if (error) throw error;
+
+        await Swal.fire({ title: 'ثبت شد ✅', text: 'مبلغ از صندوق خیریه کسر شد.', icon: 'success', confirmButtonColor: '#10b981' });
+
+        amountInput.value = '';
+        descInput.value = '';
+        calculateStats(poolId);
+        if (typeof loadTransactionLog === 'function') loadTransactionLog(poolId);
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا در ثبت', text: e.message, icon: 'error' });
+    }
+};
 
   
 /************************************************
@@ -1064,6 +1355,11 @@ window.saveNewAmounts = async function() {
     const card = document.getElementById('set-manager-card').value;
     const cardName = document.getElementById('set-manager-card-name').value;
     const mob = document.getElementById('set-manager-mobile').value;
+    const coinPerDay = document.getElementById('set-coin-per-day')?.value;
+    const coinWindow = document.getElementById('set-coin-window-days')?.value;
+    const coinCoop = document.getElementById('set-coin-cooperation-bonus')?.value;
+    const coinPrice = document.getElementById('set-coin-price')?.value;
+    const coinCharityRate = document.getElementById('set-coin-charity-rate')?.value;
 
     if (!poolId) return;
 
@@ -1074,7 +1370,12 @@ window.saveNewAmounts = async function() {
         await supabaseClient.from('settings').update({ 
             base_amount: Number(b), 
             won_amount: Number(w), 
-            investment_percent: Number(n) 
+            investment_percent: Number(n),
+            coin_per_day: coinPerDay !== undefined ? Number(coinPerDay) : undefined,
+            coin_window_days: coinWindow !== undefined ? Number(coinWindow) : undefined,
+            coin_cooperation_bonus: coinCoop !== undefined ? Number(coinCoop) : undefined,
+            coin_price_toman: coinPrice !== undefined ? Number(coinPrice) : undefined,
+            coin_charity_rate: coinCharityRate !== undefined ? Number(coinCharityRate) : undefined
         }).eq('pool_id', poolId);
 
         // ۲. آپدیت جدول صندوق (کارت و موبایل)
@@ -1128,6 +1429,17 @@ async function loadCurrentConfig(poolId) {
             if (baseInput) baseInput.value = settings.base_amount || 0; 
             if (wonInput) wonInput.value = settings.won_amount || 0; 
             if (investInput) investInput.value = settings.investment_percent || 0;
+
+            const coinPerDayInput = document.getElementById('set-coin-per-day');
+            const coinWindowInput = document.getElementById('set-coin-window-days');
+            const coinCoopInput = document.getElementById('set-coin-cooperation-bonus');
+            const coinPriceInput = document.getElementById('set-coin-price');
+            if (coinPerDayInput) coinPerDayInput.value = settings.coin_per_day ?? 2;
+            if (coinWindowInput) coinWindowInput.value = settings.coin_window_days ?? 10;
+            if (coinCoopInput) coinCoopInput.value = settings.coin_cooperation_bonus ?? 20;
+            if (coinPriceInput) coinPriceInput.value = settings.coin_price_toman ?? 10000;
+            const coinCharityInput = document.getElementById('set-coin-charity-rate');
+            if (coinCharityInput) coinCharityInput.value = settings.coin_charity_rate ?? 10000;
         }
 
         // ۲. دریافت اطلاعات کارت و موبایل از جدول pools
@@ -1451,16 +1763,42 @@ function closeQuotaModal() { document.getElementById('quota-modal').classList.ad
  * تابع باز کردن پنجره ویرایش عضو (اصلاح شده)
  ************************************************/
 // در فایل admin_app.js
-window.openEditModalById = function(memberId) {
+window.openEditModalById = async function(memberId) {
     const m = allMembersData.find(x => String(x.id) === String(memberId));
     if (!m) return;
 
-    document.getElementById('edit-member-id').value = m.id; // UUID در اینجا قرار می‌گیرد
+    document.getElementById('edit-member-id').value = m.id;
     document.getElementById('edit-member-name').value = m.full_name;
     document.getElementById('edit-member-mobile').value = m.mobile;
+    document.getElementById('edit-member-address').value = m.address || '';
+    document.getElementById('edit-member-card').value = m.bank_card || '';
     document.getElementById('edit-member-shares').value = m.total_shares || 1;
     document.getElementById('edit-member-is-admin').checked = m.is_admin || false;
-    document.getElementById('edit-member-pass').value = ""; // رمز را خالی بگذار برای امنیت
+    document.getElementById('edit-member-pass').value = "";
+
+    // پر کردن فیلدهای جدید (غیرفعال) از آخرین تراکنش ورودی
+    try {
+        const { data: txs } = await supabaseClient
+            .from('transactions')
+            .select('amount, invest_val')
+            .eq('member_id', memberId)
+            .eq('status', 'approved')
+            .eq('type', 'in')
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+        if (txs && txs.length > 0) {
+            const tx = txs[0];
+            document.getElementById('edit-member-initial').value = tx.amount || 0;
+            // اگر invest_val > 0 یعنی چک‌باکس فعال بوده
+            document.getElementById('edit-member-invest-check').checked = (tx.invest_val > 0);
+        } else {
+            document.getElementById('edit-member-initial').value = 0;
+            document.getElementById('edit-member-invest-check').checked = false;
+        }
+    } catch (e) {
+        console.warn("Could not load initial transaction:", e);
+    }
 
     document.getElementById('edit-modal').classList.remove('hidden');
 };
@@ -1635,65 +1973,122 @@ window.toggleAddMemberForm = function() {
     }
 };
 
+// باز کردن مودال افزودن عضو (با ریست فرم)
+window.openAddMemberModal = function() {
+    // ریست کردن تمام فیلدها
+    document.getElementById('new-member-name').value = '';
+    document.getElementById('new-member-mobile').value = '';
+    document.getElementById('new-member-address').value = '';
+    document.getElementById('new-member-card').value = '';
+    document.getElementById('new-member-pass').value = '';
+    document.getElementById('new-member-shares').value = '';
+    document.getElementById('new-member-initial').value = '';
+    document.getElementById('new-member-invest-check').checked = false;
+    document.getElementById('new-member-docs').value = '';
+    document.getElementById('docs-status-text').innerText = 'آپلود تصاویر مدارک شناسایی';
+    
+    // نمایش مودال
+    document.getElementById('add-member-modal').classList.remove('hidden');
+};
+
+// بستن مودال افزودن عضو
+window.closeAddMemberModal = function() {
+    document.getElementById('add-member-modal').classList.add('hidden');
+};
 
 window.addNewMember = async function() {
     const btn = document.getElementById('add-member-btn');
     const poolId = sessionStorage.getItem('pool_id');
     
-    // دریافت مقادیر
     const name = document.getElementById('new-member-name').value.trim();
     const mobile = document.getElementById('new-member-mobile').value.trim();
+    const address = document.getElementById('new-member-address').value.trim();
+    const cardEl = document.getElementById('new-member-card');
+    const bankCard = cardEl ? cardEl.value.trim() : '';
     const pass = document.getElementById('new-member-pass').value.trim();
     const shares = parseInt(document.getElementById('new-member-shares').value);
+    const initialAmount = parseFloat(document.getElementById('new-member-initial').value) || 0;
+    const investCheck = document.getElementById('new-member-invest-check').checked;
 
-    if (!name || !mobile || isNaN(shares)) return Swal.fire({text: "نام، موبایل و تعداد سهم الزامی است", icon:'warning'});
+    // ✅ VALIDATION قوی‌تر
+    if (!name) return Swal.fire({text: "نام و نام خانوادگی الزامی است", icon:'warning'});
+    if (!mobile || mobile.length < 11) return Swal.fire({text: "شماره موبایل صحیح وارد کنید (09...)", icon:'warning'});
+    if (!pass || pass.length < 6) return Swal.fire({text: "رمز عبور حداقل ۶ رقم باشد", icon:'warning'});
+    
+    // ✅ شرط سهم: حتماً باید عدد باشد و حداقل ۱
+    if (isNaN(shares) || shares < 1) {
+        return Swal.fire({text: "تعداد سهم باید حداقل ۱ باشد", icon:'warning'});
+    }
 
-    // ۱. شروع لودینگ
-    if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> در حال ثبت...'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> در حال ثبت...'; }
 
     try {
-        // ۲. ساخت هویت در Auth
         const tempSup = supabase.createClient(S_URL, S_KEY, { auth: { persistSession: false } });
         const { data: authData, error: authErr } = await tempSup.auth.signUp({
             email: `${mobile}@ebank.com`,
             password: pass
         });
-
         if (authErr) throw authErr;
 
-        // ۳. ثبت در جدول اعضا
         const { error: dbErr } = await supabaseClient.from('members').insert([{
             id: authData.user.id,
             pool_id: poolId,
             full_name: name,
             mobile: mobile,
-            total_shares: shares,
+            address: address || null,
+            bank_card: bankCard || null,
+            total_shares: shares, // ✅ دقیقاً همون عددی که مدیر وارد کرده
             is_admin: false,
             credit_score: 100,
-            eligible_at: new Date().toISOString() // از همین الان واجد شرایط برای ته صف ✅
+            eligible_at: new Date().toISOString()
         }]);
-
         if (dbErr) throw dbErr;
 
-        // ۴. کسر سهمیه
-        await supabaseClient.rpc('increment_pool_capacity', { p_id: poolId, amount: -shares });
+        // ثبت تراکنش اولیه
+        if (initialAmount > 0) {
+            const { data: settings } = await supabaseClient
+                .from('settings')
+                .select('investment_percent')
+                .eq('pool_id', poolId)
+                .maybeSingle();
+            
+            const investPercent = settings ? Number(settings.investment_percent) : 0;
+            let investVal = 0;
+            if (investCheck && investPercent > 0) {
+                investVal = Math.floor((initialAmount * investPercent) / 100);
+            }
+
+            const { error: txErr } = await supabaseClient.from('transactions').insert([{
+                pool_id: poolId,
+                member_id: authData.user.id,
+                amount: initialAmount,
+                status: 'approved',
+                type: 'in',
+                invest_val: investVal,
+                receipt_url: `ثبت اولیه عضو: ${name}`
+            }]);
+            if (txErr) throw txErr;
+        }
+
+        // کسر سهمیه (با اعتبارسنجی بیشتر) ✅
+        if (shares > 0) {
+            const { error: capErr } = await supabaseClient.rpc('increment_pool_capacity', { 
+                p_id: poolId, 
+                amount: -shares 
+            });
+            if (capErr) console.error('خطا در کسر سهمیه:', capErr);
+        }
 
         Swal.fire({ title: 'ثبت شد ✅', icon: 'success', timer: 1500, showConfirmButton: false });
 
-        // ۵. ریست کردن فرم و بستن کشو
-        document.getElementById('new-member-name').value = '';
-        document.getElementById('new-member-mobile').value = '';
-        document.getElementById('new-member-pass').value = '';
-        document.getElementById('new-member-shares').value = '';
-        
-        toggleAddMemberForm(); // بستن فرم
-        loadAllMembers(poolId); // رفرش لیست اعضا
+        closeAddMemberModal();
+        loadAllMembers(poolId);
         if(typeof updateCapacityDisplay === 'function') updateCapacityDisplay(poolId);
+        calculateStats(poolId);
 
     } catch (e) {
         Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
     } finally {
-        // ۶. آزاد کردن حتمی دکمه در هر شرایط 👇
         if(btn) {
             btn.disabled = false;
             btn.innerText = "تایید و ثبت نهایی عضو";
@@ -1721,8 +2116,8 @@ window.openMemberProfile = async function(memberId) {
     safeSet('prof-name', m.full_name);
     safeSet('prof-mobile', m.mobile);
     safeSet('prof-card', m.bank_card, 'ثبت نشده');
-    safeSet('prof-contact', m.secondary_contact, 'ثبت نشده');
     safeSet('prof-address', m.address, 'آدرس ثبت نشده'); // فیلد جدید آدرس ✅
+    safeSet('prof-coins', `${m.coins || 0} سکه`);
     
     // ۴. مدیریت هوشمند آواتار
     const imgEl = document.getElementById('prof-img');
@@ -1797,12 +2192,47 @@ window.openReportModalById = async function(memberId) {
     try {
         const { data: txs } = await supabaseClient.from('transactions').select('*').eq('member_id', m.id).eq('status', 'approved');
 
-        const totalIn = txs ? txs.filter(t => t.type === 'in').reduce((s, a) => s + Number(a.amount), 0) : 0;
-        const totalOut = txs ? txs.filter(t => t.type === 'out').reduce((s, a) => s + Number(a.amount), 0) : 0;
+        document.getElementById('rep-score').innerText = `${m.coins || 0} سکه`;
+
+        // خیریه یه هدیه‌ست، نه بدهی/طلب صندوق — از تراز اصلی جدا نگه داشته میشه
+        const balanceTxs = (txs || []).filter(t => t.category !== 'charity');
+        const charityTxs = (txs || []).filter(t => t.category === 'charity');
+
+        const totalIn = balanceTxs.filter(t => t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
+        const totalOut = balanceTxs.filter(t => t.type === 'out').reduce((s, a) => s + Number(a.amount), 0);
         const balance = totalIn - totalOut;
-        
+
         document.getElementById('rep-total-in').innerText = totalIn.toLocaleString() + " ت";
         document.getElementById('rep-total-out').innerText = totalOut.toLocaleString() + " ت";
+
+        // ریزحساب برداشت‌ها از صندوق (نه واریزی‌های ماهانه — چون همون بالا تو «Total Paid» هست)
+        const sumBy = (type, category) => balanceTxs
+            .filter(t => t.type === type && t.category === category)
+            .reduce((s, a) => s + Number(a.amount), 0);
+        const charityDonated = charityTxs.filter(t => t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
+
+        const outflows = [
+            { label: 'مساعده‌ی رأی‌گیری', val: sumBy('out', 'emergency') },
+            { label: 'مساعده‌ی سکه‌ای', val: sumBy('out', 'coin_assistance') },
+        ].filter(r => r.val > 0);
+
+        let breakdownHtml = '';
+        if (outflows.length > 0) {
+            breakdownHtml += `<p class="text-[8px] text-rose-400 font-black uppercase px-4 pt-3 pb-1">برداشت از صندوق</p>`;
+            breakdownHtml += outflows.map(r => `
+                <div class="flex justify-between items-center px-4 py-2.5">
+                    <span class="text-[9px] font-bold text-slate-500">${r.label}</span>
+                    <span class="text-[10px] font-black text-rose-600">${r.val.toLocaleString()} ت</span>
+                </div>`).join('');
+        }
+        if (charityDonated > 0) {
+            breakdownHtml += `
+                <div class="flex justify-between items-center px-4 py-3 bg-rose-50/40 border-t border-rose-50">
+                    <span class="text-[9px] font-bold text-slate-500">🎗 کمک خیریه (خارج از تراز)</span>
+                    <span class="text-[10px] font-black text-slate-500">${charityDonated.toLocaleString()} ت</span>
+                </div>`;
+        }
+        document.getElementById('rep-breakdown').innerHTML = breakdownHtml || `<p class="text-center py-4 text-slate-400 text-[9px]">برداشت یا کمکی ثبت نشده</p>`;
 
         // نمایش وضعیت بدهی/طلبی
         let statusHtml = "";
@@ -2981,6 +3411,7 @@ async function loadPendingReceipts(poolId) {
 
         if (!txs || txs.length === 0) {
             container.innerHTML = '<p class="text-center py-10 text-slate-400 text-[10px] font-black uppercase">هیچ فیش منتظری یافت نشد ✨</p>';
+            updateAccordionDot('dot-ops-1', 0);
             if (typeof updateTaskBadge === 'function') updateTaskBadge(cleanPoolId);
             return;
         }
@@ -3009,6 +3440,7 @@ async function loadPendingReceipts(poolId) {
             </div>`;
         }).join('');
 
+        updateAccordionDot('dot-ops-1', txs.length);
         if (typeof updateTaskBadge === 'function') updateTaskBadge(cleanPoolId);
 
     } catch (e) {
@@ -3027,14 +3459,14 @@ window.updateTaskBadge = async function(poolId) {
     if (!badge || !poolId) return;
 
     try {
-        // ۲. شمارش فیش‌های 'pending' از دیتابیس
-        const { count, error } = await supabaseClient
-            .from('transactions')
-            .select('*', { count: 'exact', head: true })
-            .eq('pool_id', Number(poolId))
-            .eq('status', 'pending');
+        // ۲. شمارش همه‌ی موارد در انتظار اقدام مدیر: فیش‌ها + مساعده‌های رأی‌گیری + مساعده‌های سکه‌ای
+        const [{ count: pendingReceipts }, { count: pendingLoans }, { count: pendingCoins }] = await Promise.all([
+            supabaseClient.from('transactions').select('*', { count: 'exact', head: true }).eq('pool_id', Number(poolId)).eq('status', 'pending'),
+            supabaseClient.from('loans').select('*', { count: 'exact', head: true }).eq('pool_id', Number(poolId)).eq('status', 'voting'),
+            supabaseClient.from('coin_requests').select('*', { count: 'exact', head: true }).eq('pool_id', Number(poolId)).eq('status', 'pending')
+        ]);
 
-        if (error) throw error;
+        const count = (pendingReceipts || 0) + (pendingLoans || 0) + (pendingCoins || 0);
 
         // ۳. نمایش یا مخفی کردن دایره قرمز
         if (count > 0) {
@@ -3226,7 +3658,8 @@ window.payEmergencyLoan = async function(loanId, amount, memberName, memberId) {
             if (txErr) throw txErr;
 
             // ۲. تغییر وضعیت درخواست در جدول وام‌ها
-            await supabaseClient.from('loans').update({ status: 'paid' }).eq('id', loanId);
+            const { error: loanErr } = await supabaseClient.from('loans').update({ status: 'paid' }).eq('id', loanId);
+            if (loanErr) throw loanErr;
 
             // ۳. افزایش بدهی عضو (بر اساس ID) 👇
             const { data: mData } = await supabaseClient.from('members').select('debt_target').eq('id', memberId).single();
@@ -3239,6 +3672,8 @@ window.payEmergencyLoan = async function(loanId, amount, memberName, memberId) {
             
             // رفرش لیست‌ها
             if (typeof loadAdminLoans === 'function') loadAdminLoans(poolId);
+            if (typeof loadCoinRequests === 'function') loadCoinRequests(poolId);
+            if (typeof loadTransactionLog === 'function') loadTransactionLog(poolId);
             if (typeof loadOpsTabContent === 'function') loadOpsTabContent(poolId);
             if (typeof calculateStats === 'function') calculateStats(poolId);
 

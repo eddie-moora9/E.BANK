@@ -1473,3 +1473,217 @@ window.closeDepositDrawer = function() {
         console.log("کشوی پرداخت بسته شد.");
     }
 };
+
+
+
+
+
+
+// داده‌های آزمایشی پیش‌فرض (در صورت نبود یا تاخیر اتصال)
+let currentUser = {
+    id: sessionStorage.getItem('user_id') || 'demo-user-1',
+    pool_id: sessionStorage.getItem('pool_id') || '104',
+    full_name: sessionStorage.getItem('user_name') || 'محمدرضا رضایی',
+    total_shares: 2,
+    won_shares: 1,
+    credit_score: 100,
+    won_loan_amount: 50000000,
+    remaining_loan_balance: 32500000,
+    paid_installments: 7,
+    total_installments: 20
+};
+
+let poolSettings = {
+    base_amount: 2000000,
+    won_amount: 2500000,
+    manager_card: '۶۰۳۷-۹۹۷۵-۸۸۲۱-۳۴۵۶',
+    manager_card_name: 'مدیریت صندوق تعاون'
+};
+
+document.addEventListener('DOMContentLoaded', async () => {
+    initTheme();
+    renderUserData();
+    
+    // فراخوانی داده‌های آنلاین
+    try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (session && session.user) {
+            currentUser.id = session.user.id;
+            await loadLiveMemberData(currentUser.id, currentUser.pool_id);
+        }
+        await loadTransactions();
+    } catch (e) {
+        console.log("Using Local/Demo Data:", e);
+    } finally {
+        // حذف Splash Screen
+        setTimeout(() => {
+            const splash = document.getElementById('splash-screen');
+            if (splash) {
+                splash.style.opacity = '0';
+                setTimeout(() => splash.remove(), 500);
+            }
+        }, 800);
+    }
+});
+
+// رندر داده‌های کاربر در المان‌ها
+function renderUserData() {
+    document.getElementById('user-name').innerText = currentUser.full_name;
+    document.getElementById('member-code').innerText = 'شناسه: ' + currentUser.id.slice(0, 8);
+    document.getElementById('header-score').innerText = currentUser.credit_score;
+
+    // ۱. محاسبه مبلغ قابل پرداخت ماهانه
+    const wonCount = currentUser.won_shares || 0;
+    const activeCount = Math.max(0, (currentUser.total_shares || 1) - wonCount);
+    const monthlyDue = (wonCount * poolSettings.won_amount) + (activeCount * poolSettings.base_amount);
+    
+    document.getElementById('monthly-due').innerText = monthlyDue.toLocaleString('fa-IR') + ' تومان';
+    document.getElementById('shares-text').innerText = `${currentUser.total_shares} سهم • ${wonCount} برنده`;
+    document.getElementById('deposit-amount').value = monthlyDue;
+
+    // ۲. نمایش مانده وام دریافتی و درصد پیشرفت
+    if (currentUser.won_loan_amount > 0) {
+        document.getElementById('remaining-loan-amount').innerText = (currentUser.remaining_loan_balance || 0).toLocaleString('fa-IR') + ' تومان';
+        document.getElementById('total-loan-amount').innerText = 'از ' + (currentUser.won_loan_amount || 0).toLocaleString('fa-IR') + ' ت';
+        
+        const repaid = currentUser.won_loan_amount - currentUser.remaining_loan_balance;
+        const percent = Math.min(100, Math.round((repaid / currentUser.won_loan_amount) * 100));
+        
+        document.getElementById('loan-progress').style.width = percent + '%';
+        document.getElementById('loan-percent-text').innerText = percent + '٪ بازپرداخت';
+        document.getElementById('loan-installments-text').innerText = `پرداخت ${currentUser.paid_installments} قسط از ${currentUser.total_installments}`;
+        document.getElementById('loan-settle-tag').innerText = percent + '٪ تسویه';
+    }
+
+    // ۳. شماره کارت مدیر در دراور
+    document.getElementById('manager-card-num').innerText = poolSettings.manager_card;
+    document.getElementById('manager-card-name').innerText = poolSettings.manager_card_name;
+}
+
+// تغییر تم روشن و تاریک
+function toggleTheme() {
+    const isDark = document.body.classList.contains('theme-dark');
+    if (isDark) {
+        document.body.classList.remove('theme-dark');
+        document.body.classList.add('theme-light');
+        document.getElementById('theme-icon').className = 'fas fa-moon';
+        localStorage.setItem('ebank_theme', 'light');
+    } else {
+        document.body.classList.remove('theme-light');
+        document.body.classList.add('theme-dark');
+        document.getElementById('theme-icon').className = 'fas fa-sun';
+        localStorage.setItem('ebank_theme', 'dark');
+    }
+}
+
+function initTheme() {
+    const saved = localStorage.getItem('ebank_theme') || 'dark';
+    if (saved === 'light') {
+        document.body.classList.remove('theme-dark');
+        document.body.classList.add('theme-light');
+        document.getElementById('theme-icon').className = 'fas fa-moon';
+    }
+}
+
+// تغییر تب‌ها
+function switchTab(btn, tabId) {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active-tab'));
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    
+    document.getElementById(tabId).classList.add('active-tab');
+    btn.classList.add('active');
+}
+
+// باز و بسته کردن دراور واریز
+function openDepositDrawer() {
+    document.getElementById('deposit-drawer').classList.add('open');
+}
+function closeDepositDrawer() {
+    document.getElementById('deposit-drawer').classList.remove('open');
+}
+
+// باز و بسته کردن مودال‌ها
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// کپی کارت مدیر
+function copyManagerCard() {
+    navigator.clipboard.writeText(poolSettings.manager_card.replace(/[^0-9]/g, ''));
+    Swal.fire({
+        text: 'شماره کارت کپی شد ✅',
+        icon: 'success',
+        toast: true,
+        position: 'top',
+        timer: 1500,
+        showConfirmButton: false
+    });
+}
+
+// پیش‌نمایش تصویر فیش
+function previewReceipt(input) {
+    if (input.files && input.files[0]) {
+        document.getElementById('file-status-text').innerText = 'تصویر فیش انتخاب شد ✅ (' + input.files[0].name + ')';
+    }
+}
+
+// ارسال فیش
+async function submitReceipt(e) {
+    e.preventDefault();
+    const amount = document.getElementById('deposit-amount').value;
+    
+    // شبیه‌سازی ثبت موفق
+    confetti({ particleCount: 40, spread: 60 });
+    closeDepositDrawer();
+    
+    Swal.fire({
+        title: 'فیش با موفقیت ثبت شد',
+        text: 'پس از بررسی و تایید مدیر، به موجودی پس‌انداز شما افزوده خواهد شد.',
+        icon: 'success',
+        confirmButtonText: 'متوجه شدم'
+    });
+}
+
+// ارسال درخواست وام
+function submitLoan() {
+    const amount = document.getElementById('loan-req-amount').value;
+    if (!amount) return Swal.fire({ text: 'لطفاً مبلغ وام را وارد فرمایید.', icon: 'warning' });
+    
+    confetti({ particleCount: 30, spread: 50 });
+    document.getElementById('loan-req-amount').value = '';
+    document.getElementById('loan-req-desc').value = '';
+    
+    Swal.fire({
+        title: 'درخواست ثبت شد',
+        text: 'درخواست وام ضروری شما جهت رای‌گیری برای اعضای صندوق فعال شد.',
+        icon: 'success'
+    });
+}
+
+// ارسال درخواست تعویض نوبت
+function submitSwapRequest(e) {
+    e.preventDefault();
+    closeModal('swap-modal');
+    confetti({ particleCount: 30, spread: 50 });
+    
+    Swal.fire({
+        title: 'فراخوان منتشر شد',
+        text: 'فراخوان تعویض نوبت شما با ۵ امتیاز هدیه در تابلوی اعلانات قرار گرفت.',
+        icon: 'success'
+    });
+}
+
+// خروج از حساب
+function logout() {
+    Swal.fire({
+        text: 'آیا از خروج از حساب کاربری اطمینان دارید؟',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'بله، خروج',
+        cancelButtonText: 'انصراف'
+    }).then((res) => {
+        if (res.isConfirmed) {
+            supabaseClient.auth.signOut();
+            window.location.reload();
+        }
+    });
+}
