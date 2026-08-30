@@ -192,10 +192,13 @@ window.showAdminSec = function(btn, sectionId) {
         if (el) el.classList.add('hidden');
     });
 
-    // ۲. نمایش بخش انتخاب شده
+    // ۲. نمایش بخش انتخاب شده (با ری‌استارت انیمیشن fadeIn، تا همه‌ی تب‌ها یکسان رفتار کنن)
     const target = document.getElementById(sectionId);
     if (target) {
         target.classList.remove('hidden');
+        target.classList.remove('animate__fadeIn');
+        void target.offsetWidth; // فورس ریفلو برای ری‌استارت انیمیشن
+        target.classList.add('animate__animated', 'animate__fadeIn');
         window.scrollTo(0, 0); // پرش به ابتدای صفحه
     }
     
@@ -227,6 +230,7 @@ if (sectionId === 'admin-ops-sec') {
     loadAdminLoans(pId);        // لود درخواست‌های مساعده 👈 اضافه شد
     loadCoinRequests(pId);       // لود درخواست‌های مساعده‌ی سکه‌ای
     loadTransactionLog(pId);    // لود لاگ تراکنش‌ها
+    checkMonthlyLoanWarning(pId); // چک اخطار وام ماهانه‌ی پرداخت‌نشده
     loadOpsTabContent(pId);     // لود صف نوبت و بدهکاران
 }
 
@@ -648,9 +652,17 @@ window.handleDeleteWithSettlement = async function() {
 
     if (result.isConfirmed) {
         try {
-            Swal.fire({ title: 'در حال تسویه نهایی...', didOpen: () => Swal.showLoading() });
-
             const poolId = sessionStorage.getItem('pool_id');
+
+            // چک موجودی صندوق اصلی قبل از هر برداشتی (فقط وقتی واقعاً از صندوق خارج میشه)
+            if (balance > 0) {
+                const balancesCheck = await getCurrentFundBalances(poolId);
+                if (absBalance > balancesCheck.mainFund) {
+                    return insufficientFundsAlert('صندوق اصلی', absBalance, balancesCheck.mainFund);
+                }
+            }
+
+            Swal.fire({ title: 'در حال تسویه نهایی...', didOpen: () => Swal.showLoading() });
 
             // ۱. ثبت تراکنش تسویه برای اصلاح موجودی کل صندوق 👇
             // اگر بستانکار بود، از صندوق کم می‌شود. اگر بدهکار بود، به صندوق اضافه می‌شود.
@@ -795,10 +807,104 @@ async function loadCoinRequests(poolId) {
  * پنل‌های کشویی عمومی (افتتاح پروژه، برداشت خیریه و ...)
  * با کلیک روی دکمه/کارت باز میشن، با کلیک بیرون بسته میشن
  ************************************************/
+/************************************************
+ * محاسبه‌ی زنده‌ی موجودی هر صندوق (برای جلوگیری از تراکنش منفی)
+ ************************************************/
+async function getCurrentFundBalances(poolId) {
+    const { data: txs } = await supabaseClient
+        .from('transactions')
+        .select('amount, type, category, invest_val')
+        .eq('pool_id', poolId)
+        .eq('status', 'approved');
+
+    let totalIn = 0, totalOut = 0, totalInvestTarget = 0, actualCapitalSpent = 0, totalProfitIn = 0, totalProfitDist = 0, charityIn = 0, charityOut = 0;
+
+    (txs || []).forEach(t => {
+        const val = Number(t.amount || 0);
+        const inv = Number(t.invest_val || 0);
+        if (t.category === 'charity') {
+            if (t.type === 'in') charityIn += val; else if (t.type === 'out') charityOut += val;
+            return;
+        }
+        totalInvestTarget += inv;
+        if (t.type === 'in') totalIn += val;
+        else if (t.type === 'out') totalOut += val;
+        else if (t.type === 'capital_spend') actualCapitalSpent += val;
+        else if (t.type === 'profit') totalProfitIn += val;
+        else if (t.type === 'distribution') totalProfitDist += val;
+    });
+
+    return {
+        mainFund: (totalIn - totalInvestTarget) - totalOut,
+        investFund: totalInvestTarget - actualCapitalSpent,
+        profitFund: totalProfitIn - totalProfitDist,
+        charityFund: charityIn - charityOut
+    };
+}
+
+function insufficientFundsAlert(fundLabel, needed, available) {
+    Swal.fire({
+        title: 'موجودی کافی نیست ❌',
+        html: `موجودی «${fundLabel}» فقط <b>${Math.max(0, available).toLocaleString()} ت</b> است، ولی مبلغ درخواستی <b>${Number(needed).toLocaleString()} ت</b> است.`,
+        icon: 'error',
+        confirmButtonColor: '#ef4444',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+}
+
 function updateAccordionDot(dotId, count) {
     const dot = document.getElementById(dotId);
     if (!dot) return;
     dot.classList.toggle('hidden', !(count > 0));
+}
+
+/************************************************
+ * بنر هشدار پلکانی برای وام نوبتی پرداخت‌نشده (روز ۲ تا ۵ ماه)
+ ************************************************/
+async function checkMonthlyLoanWarning(poolId) {
+    const banner = document.getElementById('monthly-loan-warning-banner');
+    const textEl = document.getElementById('monthly-loan-warning-text');
+    if (!banner || !textEl || !poolId) return;
+
+    const today = new Date();
+    const dayOfMonth = today.getDate();
+
+    if (dayOfMonth < 2) { banner.classList.add('hidden'); return; }
+
+    try {
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+        const { data: paidThisMonth } = await supabaseClient
+            .from('transactions')
+            .select('id')
+            .eq('pool_id', poolId)
+            .eq('status', 'approved')
+            .eq('type', 'out')
+            .eq('category', 'monthly')
+            .gte('created_at', firstDayOfMonth)
+            .limit(1);
+
+        if (paidThisMonth && paidThisMonth.length > 0) {
+            banner.classList.add('hidden');
+            return;
+        }
+
+        let style, text;
+        if (dayOfMonth === 2) {
+            style = 'bg-amber-50 border-amber-100 text-amber-600';
+            text = `امروز روز ۲ ماهه — وام نوبتی این ماه هنوز پرداخت نشده.`;
+        } else if (dayOfMonth === 3 || dayOfMonth === 4) {
+            style = 'bg-orange-50 border-orange-100 text-orange-600';
+            text = `روز ${dayOfMonth} ماهه — وام نوبتی این ماه هنوز پرداخت نشده، لطفاً هرچه زودتر اقدام کنید.`;
+        } else {
+            style = 'bg-rose-50 border-rose-200 text-rose-600';
+            text = `⚠️ روز ${dayOfMonth} ماهه — وام نوبتی این ماه هنوز پرداخت نشده! از مهلت معمول (تا پنجم) گذشته.`;
+        }
+
+        banner.classList.remove('hidden');
+        banner.className = `p-5 rounded-[2rem] border flex items-center gap-3 ${style}`;
+        textEl.innerText = text;
+
+    } catch (e) { console.error("Error checking monthly loan warning:", e); }
 }
 
 function toggleCollapsiblePanel(panelId, event) {
@@ -966,6 +1072,12 @@ window.createNewProject = async function() {
 
     if (!confirmResult.isConfirmed) return;
 
+    // چک موجودی صندوق سرمایه‌گذاری قبل از هر برداشتی
+    const balancesCheck = await getCurrentFundBalances(poolId);
+    if (amount > balancesCheck.investFund) {
+        return insufficientFundsAlert('صندوق سرمایه‌گذاری', amount, balancesCheck.investFund);
+    }
+
     // نمایش لودینگ
     Swal.fire({ title: 'در حال ثبت پرونده...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
@@ -1039,6 +1151,12 @@ window.withdrawFromCharity = async function() {
         customClass: { popup: 'rounded-[2.5rem]' }
     });
     if (!confirmResult.isConfirmed) return;
+
+    // چک موجودی صندوق خیریه قبل از هر برداشتی
+    const balancesCheck = await getCurrentFundBalances(poolId);
+    if (amount > balancesCheck.charityFund) {
+        return insufficientFundsAlert('صندوق خیریه', amount, balancesCheck.charityFund);
+    }
 
     try {
         const { error } = await supabaseClient.from('transactions').insert([{
@@ -2987,6 +3105,24 @@ window.payStandardLoan = async function(memberId, memberName) {
 
     if (!amount) return;
 
+    // بلوکه‌کردن پرداخت وام نوبتی بعد از پنجم ماه
+    const dayNow = new Date().getDate();
+    if (dayNow > 5) {
+        return Swal.fire({
+            title: 'خارج از بازه‌ی مجاز',
+            text: 'پرداخت وام نوبتی فقط تا پنجم هر ماه امکان‌پذیره. برای این ماه دیر شده، ماه بعد اقدام کنید.',
+            icon: 'warning',
+            confirmButtonColor: '#4f46e5',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+    }
+
+    // چک موجودی صندوق اصلی قبل از هر برداشتی
+    const balances = await getCurrentFundBalances(poolId);
+    if (Number(amount) > balances.mainFund) {
+        return insufficientFundsAlert('صندوق اصلی', amount, balances.mainFund);
+    }
+
     try {
         Swal.fire({ title: 'در حال ثبت تراکنش...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
@@ -3493,6 +3629,27 @@ async function loadAllMembers(poolId) {
         
         if (error) throw error;
 
+        // چه کسانی این ماه قسط ماهانه رو پرداخت (و تایید) کردن؟ + تنظیمات سکه برای تشخیص شدت تاخیر
+        const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+        const [{ data: paidTxs }, { data: coinSettings }] = await Promise.all([
+            supabaseClient.from('transactions').select('member_id')
+                .eq('pool_id', poolId).eq('status', 'approved').eq('category', 'monthly').eq('type', 'in')
+                .gte('created_at', firstDayOfMonth),
+            supabaseClient.from('settings').select('coin_window_days').eq('pool_id', poolId).maybeSingle()
+        ]);
+        const paidThisMonth = new Set((paidTxs || []).map(t => String(t.member_id)));
+
+        // آیا اگه همین امروز پرداخت بشه، تو منطقه‌ی کسر سکه‌ایم؟ (پلکانی، نه فقط پرداخت‌شده/نشده)
+        const winDays = Number(coinSettings?.coin_window_days) || 10;
+        const half = Math.floor(winDays / 2);
+        const today = new Date();
+        const thisMonthFirst = new Date(today.getFullYear(), today.getMonth(), 1);
+        const nextMonthFirst = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+        const diffToThis = Math.round((today - thisMonthFirst) / 86400000);
+        const diffToNext = Math.round((today - nextMonthFirst) / 86400000);
+        const todaysOffset = Math.abs(diffToNext) < Math.abs(diffToThis) ? diffToNext : diffToThis;
+        const inCoinDeductionZone = todaysOffset > half;
+
         // مرتب‌سازی (مدیر اول، بعد بر اساس نام)
         const sorted = members.sort((a, b) => {
             if (a.is_admin && !b.is_admin) return -1;
@@ -3518,6 +3675,18 @@ async function loadAllMembers(poolId) {
             // مدال‌های افتخار
             const badgesHtml = window.generateMemberBadges ? generateMemberBadges(m) : '';
 
+            // نشانه‌ی پرداخت قسط این ماه — پلکانی (فقط برای اعضای عادی، نه مدیر)
+            let paymentDot = '';
+            if (!m.is_admin) {
+                if (paidThisMonth.has(String(m.id))) {
+                    paymentDot = `<span title="قسط این ماه پرداخت شده" class="w-2.5 h-2.5 bg-emerald-500 rounded-full shrink-0"></span>`;
+                } else if (inCoinDeductionZone) {
+                    paymentDot = `<span title="پرداخت نشده — دیگه از سکه‌هاش کم میشه!" class="w-2.5 h-2.5 bg-rose-600 rounded-full shrink-0 animate-pulse ring-2 ring-rose-200"></span>`;
+                } else {
+                    paymentDot = `<span title="هنوز پرداخت نکرده، ولی هنوز تو مهلته" class="w-2.5 h-2.5 bg-amber-400 rounded-full shrink-0"></span>`;
+                }
+            }
+
             return `
                 <div onclick="openMemberProfile('${m.id}')" class="flex items-center gap-4 p-4 border-b border-slate-50 transition-all hover:bg-slate-50 active:bg-slate-100 ${m.is_admin ? 'bg-indigo-50/40' : ''}">
                     ${avatarContent}
@@ -3525,6 +3694,7 @@ async function loadAllMembers(poolId) {
                         <div class="flex items-center gap-2">
                             <h4 class="text-[13px] font-[900] text-slate-800">${m.full_name}</h4>
                             ${m.is_admin ? '<span class="text-[7px] bg-slate-900 text-white px-1.5 py-0.5 rounded">مدیر</span>' : ''}
+                            ${paymentDot}
                         </div>
                         ${badgesHtml}
                     </div>
@@ -3641,6 +3811,12 @@ window.payEmergencyLoan = async function(loanId, amount, memberName, memberId) {
     });
 
     if (result.isConfirmed) {
+        // چک موجودی صندوق اصلی قبل از هر برداشتی
+        const balances = await getCurrentFundBalances(poolId);
+        if (Number(amount) > balances.mainFund) {
+            return insufficientFundsAlert('صندوق اصلی', amount, balances.mainFund);
+        }
+
         try {
             Swal.fire({ title: 'در حال کسر از موجودی...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
