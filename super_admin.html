@@ -7,12 +7,9 @@
     
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- حتماً این خط رو قبل از فایل super_admin_app.js بذار 👇 -->
-<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
-<!-- SweetAlert2 must load before super_admin_app.js -->
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
+<!-- حتماً این خط رو قبل از فایل super_admin_app.js بذار 👇 -->
 </head>
    <style>
     @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
@@ -78,13 +75,12 @@
 <body class="p-0">
 
     <header class="p-6 flex justify-between items-center">
-        <div id="user-name-display" class="sr-only" aria-live="polite"></div>
         <div>
             <h1 class="text-2xl font-[900] text-white">COMMAND <span class="text-yellow-500">CENTER</span></h1>
             <p class="text-[8px] text-slate-500 font-black tracking-widest mt-1">SYSTEM OVERSEER ACTIVE</p>
         </div>
-        <button onclick="location.href='admin.html'" class="w-12 h-12 glass-card !m-0 !p-0 flex items-center justify-center text-yellow-500">
-            <i class="fas fa-th-large text-xl"></i>
+        <button onclick="superAdminLogout()" class="w-12 h-12 glass-card !m-0 !p-0 flex items-center justify-center text-rose-400" title="خروج امن">
+            <i class="fas fa-power-off text-xl"></i>
         </button>
     </header>
 
@@ -109,7 +105,7 @@
 
         <!-- ردیف دوم: شماره کارت (فیکس شده برای موبایل) -->
         <div class="mb-6">
-            <input type="tel" id="master-card-input" placeholder="0000 0000 0000 0000" maxlength="16" inputmode="numeric" pattern="[0-9 ]{16,19}" autocomplete="off"
+            <input type="tel" id="master-card-input" placeholder="0000 0000 0000 0000" maxlength="16"
                 class="w-full bg-transparent border-none text-center text-[1.35rem] font-black text-white tracking-[0.05em] outline-none placeholder:text-slate-800"
                 style="font-family: monospace;">
         </div>
@@ -134,7 +130,7 @@
     </div>
 
     <!-- دکمه ذخیره زیر کارت -->
-    <button onclick="saveMasterCard(this)" class="btn-action w-full mt-4 bg-yellow-500 text-slate-950 py-4 rounded-2xl font-[900] text-sm shadow-xl shadow-yellow-500/10 flex items-center justify-center gap-2">
+    <button onclick="saveMasterCard()" class="btn-action w-full mt-4 bg-yellow-500 text-slate-950 py-4 rounded-2xl font-[900] text-sm shadow-xl shadow-yellow-500/10 flex items-center justify-center gap-2">
         <i class="fas fa-save"></i>
         ذخیره تنظیمات کارت بانکی
     </button>
@@ -247,7 +243,7 @@
     </p>
     <div class="flex gap-2">
         <input type="number" id="click-constant-input" class="flex-1 bg-slate-950 border-none rounded-xl p-3 text-center text-blue-400 font-black text-sm outline-none">
-        <button onclick="saveClickConstant(this)" class="bg-blue-600 text-white px-4 rounded-xl font-bold text-xs btn-tap">ذخیره</button>
+        <button onclick="saveClickConstant()" class="bg-blue-600 text-white px-4 rounded-xl font-bold text-xs btn-tap">ذخیره</button>
     </div>
 </div>
     </div>
@@ -267,4 +263,4 @@
     <script src="super_admin_app.js"></script>
    
 </body>
-</html>
+                            </html>
