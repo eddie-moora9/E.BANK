@@ -265,6 +265,25 @@ updateTaskBadge(pId); // چک کردن مداوم وضعیت فیش‌ها ✅
             if (displayHeader) displayHeader.innerText = diffDays > 0 ? diffDays + " روز باقی‌مانده" : "منقضی شده ⚠️";
             if (displayLarge) displayLarge.innerText = diffDays > 0 ? diffDays : "۰";
 
+            // رنگ‌بندی هوشمند کارت اشتراک تو منوی همبرگری: آبی → زرد کم‌رنگ (≤۵ روز) → قرمز (صفر یا منفی)
+            const card = document.getElementById('sub-plan-card');
+            const warningEl = document.getElementById('sub-warning-text');
+            if (card) {
+                if (diffDays <= 0 || pool.is_active === false) {
+                    card.className = "bg-rose-50 p-5 rounded-[2rem] border border-rose-200 mb-6 mt-2 transition-colors duration-500";
+                    if (warningEl) {
+                        warningEl.classList.remove('hidden');
+                        warningEl.innerText = 'اعتبار پنل شما تمام شده و تا ۶ ساعت آینده پنل قفل خواهد شد. لطفاً نسبت به شارژ پنل اقدام نمایید.';
+                    }
+                } else if (diffDays <= 5) {
+                    card.className = "bg-amber-50/60 p-5 rounded-[2rem] border border-amber-100 mb-6 mt-2 transition-colors duration-500";
+                    if (warningEl) warningEl.classList.add('hidden');
+                } else {
+                    card.className = "bg-indigo-50/50 p-5 rounded-[2rem] border border-indigo-100 mb-6 mt-2 transition-colors duration-500";
+                    if (warningEl) warningEl.classList.add('hidden');
+                }
+            }
+
             // تغییر رنگ هوشمند نشانگر (Pill)
             if (pill) {
                 if (diffDays <= 0 || pool.is_active === false) {
@@ -561,6 +580,29 @@ window.updateMember = async function() {
 
     const memberId = elId.value;
     const poolId = sessionStorage.getItem('pool_id');
+    const newShares = elShares ? parseInt(elShares.value) : 1;
+
+    if (isNaN(newShares) || newShares < 1) {
+        return Swal.fire({ text: "تعداد سهم باید حداقل ۱ باشد", icon: 'warning' });
+    }
+
+    // ✅ چک سهمیه بر اساس تفاوت سهم قبلی و جدید (نه فقط عدد جدید)
+    const [{ data: oldMember, error: oldErr }, { data: poolNow, error: poolErr }] = await Promise.all([
+        supabaseClient.from('members').select('total_shares').eq('id', memberId).single(),
+        supabaseClient.from('pools').select('member_capacity').eq('id', poolId).single()
+    ]);
+    if (oldErr || poolErr) return Swal.fire({ title: 'خطا', text: 'دریافت اطلاعات سهمیه ممکن نشد.', icon: 'error' });
+
+    const shareDelta = newShares - Number(oldMember.total_shares);
+    if (shareDelta > 0 && shareDelta > Number(poolNow.member_capacity)) {
+        return Swal.fire({
+            title: 'سهمیه کافی نیست',
+            text: `سهمیه‌ی باقی‌مانده‌ی صندوق ${poolNow.member_capacity} سهمه، ولی می‌خوای ${shareDelta} سهم بیشتر بدی.`,
+            icon: 'error',
+            confirmButtonColor: '#e11d48',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+    }
 
     // ۳. شروع لودینگ دکمه
     toggleLoading('edit-save-btn', true, 'در حال بروزرسانی...');
@@ -571,14 +613,19 @@ window.updateMember = async function() {
             full_name: elName.value.trim(),
             mobile: elMobile.value.trim(),
             address: elAddr ? elAddr.value.trim() : "",
-            total_shares: elShares ? parseInt(elShares.value) : 1,
+            total_shares: newShares,
             is_admin: elAdmin ? elAdmin.checked : false
         };
 
-        // ۵. اگر رمز جدید وارد شده بود
-        if (elPass && elPass.value.length >= 6) {
-            updateData.password = await hashPassword(elPass.value);
-        }
+    // ۵. اگر رمز جدید وارد شده بود — رمز واقعی ورود (Supabase Auth) رو عوض می‌کنیم، نه یه ستون بی‌ربط
+    let passwordResetOk = true;
+    if (elPass && elPass.value.length >= 6) {
+        const { data: pwOk, error: pwErr } = await supabaseClient.rpc('admin_reset_member_password', {
+            target_member_id: memberId,
+            new_password: elPass.value
+        });
+        if (pwErr || !pwOk) passwordResetOk = false;
+    }
 
         // ۶. عملیات در دیتابیس
         const { error } = await supabaseClient
@@ -588,24 +635,26 @@ window.updateMember = async function() {
 
         if (error) throw error;
 
+        // ۶.۵ اصلاح سهمیه‌ی صندوق بر اساس تفاوت سهم (اگه سهم کم شده بود، سهمیه برمی‌گرده)
+        if (shareDelta !== 0) {
+            const { error: capErr } = await supabaseClient.rpc('increment_pool_capacity', { p_id: poolId, amount: -shareDelta });
+            if (capErr) console.error('خطا در اصلاح سهمیه:', capErr);
+        }
+
         // ۷. موفقیت
         Swal.fire({
             title: 'بروزرسانی موفق ✅',
-            text: `اطلاعات ${elName.value} با موفقیت تغییر یافت.`,
-            icon: 'success',
-            timer: 2000,
-            showConfirmButton: false,
+            text: passwordResetOk ? `اطلاعات ${elName.value} با موفقیت تغییر یافت.` : `اطلاعات ${elName.value} ذخیره شد، ولی تغییر رمز عبور با خطا مواجه شد.`,
+            icon: passwordResetOk ? 'success' : 'warning',
+            timer: passwordResetOk ? 2000 : undefined,
+            showConfirmButton: !passwordResetOk,
             customClass: { popup: 'rounded-[2rem]' }
         });
-        
-        const shares = parseInt(document.getElementById('edit-member-shares').value);
-if (isNaN(shares) || shares < 1) {
-    return Swal.fire({text: "تعداد سهم باید حداقل ۱ باشد", icon:'warning'});
-}
 
         // بستن مودال و رفرش لیست اعضا بدون رفرش کل صفحه
         document.getElementById('edit-modal').classList.add('hidden');
         loadAllMembers(poolId);
+        if (typeof updateCapacityDisplay === 'function') updateCapacityDisplay(poolId);
 
     } catch (e) {
         console.error("Update Error:", e);
@@ -852,6 +901,371 @@ function insufficientFundsAlert(fundLabel, needed, available) {
     });
 }
 
+/************************************************
+ * خروجی PDF (چاپ با واترمارک) و اکسل از تراکنش‌ها
+ * از همون لیست فیلترشده‌ی فعلی (_txLogCache + فیلترهای فعال) استفاده می‌کنه
+ ************************************************/
+function getFilteredTxList() {
+    const searchTerm = (document.getElementById('tx-log-search')?.value || '').trim().toLowerCase();
+    const typeFilter = document.getElementById('tx-log-type-filter')?.value || 'all';
+    let txs = _txLogCache;
+    if (typeFilter !== 'all') txs = txs.filter(t => t.type === typeFilter);
+    if (searchTerm) txs = txs.filter(t => (t.members?.full_name || '').toLowerCase().includes(searchTerm));
+    return txs;
+}
+
+window.exportTransactionsPDF = function() {
+    const txs = getFilteredTxList();
+    if (!txs.length) return Swal.fire({ text: 'تراکنشی برای خروجی گرفتن نیست', icon: 'warning' });
+
+    document.getElementById('print-report-date').innerText = 'تاریخ گزارش: ' + new Date().toLocaleDateString('fa-IR');
+    document.getElementById('print-report-body').innerHTML = txs.map(t => {
+        const isCredit = (t.type === 'in' || t.type === 'profit');
+        const date = new Date(t.created_at).toLocaleDateString('fa-IR-u-nu-latn');
+        const who = t.members ? t.members.full_name : (t.category === 'charity' ? 'صندوق خیریه' : 'ستاد صندوق');
+        const desc = /^https?:\/\//.test(t.receipt_url || '') ? 'فیش آپلودی' : (t.receipt_url || '-');
+        return `<tr>
+            <td style="border:1px solid #cbd5e1; padding:5px; text-align:center;">${date}</td>
+            <td style="border:1px solid #cbd5e1; padding:5px; text-align:center;">${escapeHtml(txLabel(t))}</td>
+            <td style="border:1px solid #cbd5e1; padding:5px; text-align:center;">${escapeHtml(who)}</td>
+            <td style="border:1px solid #cbd5e1; padding:5px; text-align:center;">${escapeHtml(desc)}</td>
+            <td style="border:1px solid #cbd5e1; padding:5px; text-align:center; color:${isCredit ? '#059669' : '#e11d48'};">${isCredit ? '+' : '−'}${Number(t.amount).toLocaleString()}</td>
+        </tr>`;
+    }).join('');
+
+    setTimeout(() => window.print(), 150);
+};
+
+window.exportTransactionsExcel = function() {
+    const txs = getFilteredTxList();
+    if (!txs.length) return Swal.fire({ text: 'تراکنشی برای خروجی گرفتن نیست', icon: 'warning' });
+
+    const headers = ['تاریخ', 'نوع تراکنش', 'عضو', 'توضیح', 'مبلغ (تومان)'];
+    const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    const rows = txs.map(t => {
+        const date = new Date(t.created_at).toLocaleDateString('fa-IR-u-nu-latn');
+        const who = t.members ? t.members.full_name : (t.category === 'charity' ? 'صندوق خیریه' : 'ستاد صندوق');
+        const desc = /^https?:\/\//.test(t.receipt_url || '') ? 'فیش آپلودی' : (t.receipt_url || '');
+        const signedAmount = (t.type === 'in' || t.type === 'profit') ? Number(t.amount) : -Number(t.amount);
+        return [date, txLabel(t), who, desc, signedAmount].map(csvEscape).join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.map(csvEscape).join(','), ...rows].join('\r\n'); // BOM برای نمایش درست فارسی در اکسل
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `transactions-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+};
+
+/************************************************
+ * جابجایی سریع بین پنل مدیر و پنل عضویت شخصی (v1)
+ * توکن (نه رمز) ذخیره میشه، دفعه‌ی اول رمز می‌پرسه، بعدش مستقیم وصل میشه
+ ************************************************/
+const MEMBER_SESSION_KEY = 'ebank_linked_member_session';
+
+window.switchToMemberPanel = async function() {
+    // هویت مدیر فعلی رو می‌گیریم — هم برای اسکوپ‌کردن کلید ذخیره‌سازی، هم برای جلوگیری از وصل‌شدن به شماره‌ی خودش
+    const { data: { user: currentAdmin } } = await supabaseClient.auth.getUser();
+    if (!currentAdmin) return;
+
+    const sessionKey = MEMBER_SESSION_KEY + '_' + currentAdmin.id;
+    const saved = localStorage.getItem(sessionKey);
+
+    if (saved) {
+        // قبلاً وصل شده — مستقیم با همون نشست ذخیره‌شده بریم تو، بدون لاگین دوباره
+        location.href = 'member.html?linked=1';
+        return;
+    }
+
+    // اولین بار: شماره و رمز عضویت شخصی رو بگیر
+    const { value: formValues } = await Swal.fire({
+        title: 'اتصال به اکانت عضویت شخصی',
+        html: `
+            <input id="swal-link-mobile" class="swal2-input" placeholder="شماره موبایل عضویت (09...)" style="direction:ltr; text-align:center; width:85%; max-width:100%; box-sizing:border-box; margin:8px auto;">
+            <input id="swal-link-pass" type="password" class="swal2-input" placeholder="رمز عبور عضویت" style="width:85%; max-width:100%; box-sizing:border-box; margin:8px auto;">
+        `,
+        confirmButtonText: 'اتصال و ورود',
+        cancelButtonText: 'انصراف',
+        showCancelButton: true,
+        confirmButtonColor: '#4f46e5',
+        customClass: { popup: 'rounded-[2.5rem]' },
+        preConfirm: () => {
+            const mobile = document.getElementById('swal-link-mobile').value.trim();
+            const pass = document.getElementById('swal-link-pass').value.trim();
+            if (!mobile || !pass) {
+                Swal.showValidationMessage('شماره و رمز عضویت رو کامل وارد کن');
+                return false;
+            }
+            return [mobile, pass];
+        }
+    });
+    if (!formValues) return;
+
+    const [mobile, pass] = formValues;
+
+    // نباید بشه با همون شماره‌ی مدیریتی وصل شد — باید یه عضو جدا و متفاوت باشه
+    if (`${mobile}@ebank.com` === currentAdmin.email) {
+        return Swal.fire({
+            title: 'این شماره‌ی مدیریتیته',
+            text: 'باید شماره‌ی یه عضو دیگه (اکانت عضویت شخصیت با شماره‌ی متفاوت) رو وارد کنی، نه همین شماره‌ای که باهاش وارد پنل مدیر شدی.',
+            icon: 'warning',
+            confirmButtonColor: '#4f46e5',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+    }
+
+    Swal.fire({ title: 'در حال اتصال...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+
+    try {
+        // یه کلاینت جدا و غیرماندگار، تا نشست خودِ مدیر دست‌نخورده بمونه
+        const linkClient = supabase.createClient(S_URL, S_KEY, { auth: { persistSession: false } });
+        const { data, error } = await linkClient.auth.signInWithPassword({
+            email: `${mobile}@ebank.com`,
+            password: pass
+        });
+        if (error) throw new Error('شماره یا رمز عضویت اشتباهه ❌');
+
+        // فقط توکن‌های نشست ذخیره میشه، نه خودِ رمز — و مخصوص همین مدیره، نه سراسری
+        localStorage.setItem(sessionKey, JSON.stringify({
+            refresh_token: data.session.refresh_token,
+            access_token: data.session.access_token
+        }));
+
+        Swal.fire({ title: 'وصل شد ✅', icon: 'success', timer: 1200, showConfirmButton: false });
+        setTimeout(() => { location.href = 'member.html?linked=1'; }, 700);
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
+    }
+};
+
+/************************************************
+ * گزارش مشکل / پیشنهاد — مدیر می‌تونه از همبرگر منو ثبت کنه
+ ************************************************/
+window.openReportIssueModal = async function() {
+    const { value: formValues } = await Swal.fire({
+        title: 'گزارش مشکل / پیشنهاد',
+        html: `
+            <select id="swal-report-type" class="swal2-select" style="width:85%; max-width:100%; box-sizing:border-box; margin:8px auto;">
+                <option value="bug">🐞 گزارش باگ / مشکل فنی</option>
+                <option value="idea">💡 پیشنهاد / ایده برای بهتر شدن</option>
+            </select>
+            <textarea id="swal-report-msg" class="swal2-textarea" placeholder="توضیح بده دقیقاً چی شده یا چه ایده‌ای داری..." style="width:85%; max-width:100%; box-sizing:border-box; margin:8px auto; min-height:120px;"></textarea>
+        `,
+        confirmButtonText: 'ثبت و ارسال',
+        cancelButtonText: 'انصراف',
+        showCancelButton: true,
+        confirmButtonColor: '#4f46e5',
+        customClass: { popup: 'rounded-[2.5rem]' },
+        preConfirm: () => {
+            const type = document.getElementById('swal-report-type').value;
+            const msg = document.getElementById('swal-report-msg').value.trim();
+            if (!msg) {
+                Swal.showValidationMessage('توضیح رو خالی نذار');
+                return false;
+            }
+            return [type, msg];
+        }
+    });
+    if (!formValues) return;
+
+    const [reportType, message] = formValues;
+    const poolId = sessionStorage.getItem('pool_id');
+
+    Swal.fire({ title: 'در حال ارسال...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const { data: me } = await supabaseClient.from('members').select('full_name, mobile').eq('id', user.id).single();
+
+        const { error } = await supabaseClient.from('feedback_reports').insert([{
+            pool_id: poolId,
+            member_id: user.id,
+            reporter_name: me?.full_name || '',
+            reporter_mobile: me?.mobile || '',
+            report_type: reportType,
+            message: message
+        }]);
+        if (error) throw error;
+
+        Swal.fire({ title: 'ارسال شد ✅', text: 'ممنون بابت گزارشت، بررسی میشه.', icon: 'success', confirmButtonColor: '#10b981' });
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا در ارسال', text: e.message, icon: 'error' });
+    }
+};
+
+
+window.openDangerZoneReset = async function() {
+    const step1 = await Swal.fire({
+        title: '⚠️ منطقه خطر',
+        html: `<p style="font-size:12px; line-height:1.9; color:#475569;">
+                 با این کار <b>همه‌ی</b> اعضا، تراکنش‌ها، وام‌ها، سکه‌ها، اخبار و نظرسنجی‌های این صندوق
+                 برای همیشه پاک میشن. فقط حساب خودِ شما (مدیر) با آمار صفرشده باقی می‌مونه.
+               </p>
+               <p style="font-size:10px; color:#e11d48; margin-top:10px; font-weight:900;">این عملیات غیرقابل بازگشته!</p>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'متوجه‌ام، ادامه بده',
+        cancelButtonText: 'انصراف',
+        confirmButtonColor: '#e11d48',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+    if (!step1.isConfirmed) return;
+
+    const step2 = await Swal.fire({
+        title: 'تایید هویت',
+        input: 'password',
+        inputPlaceholder: 'رمز عبور ورود به پنل مدیر',
+        text: 'برای تایید نهایی، رمز عبور اکانت خودتون رو وارد کنید',
+        confirmButtonText: 'ریست کن',
+        cancelButtonText: 'انصراف',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+    if (!step2.isConfirmed || !step2.value) return;
+
+    Swal.fire({ title: 'در حال تایید رمز عبور...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user?.email) throw new Error('نشست کاربری معتبر نیست، دوباره وارد شوید.');
+
+        // تایید رمز از طریق ورود مجدد با همون ایمیل/رمز
+        const { error: authErr } = await supabaseClient.auth.signInWithPassword({
+            email: user.email,
+            password: step2.value
+        });
+        if (authErr) throw new Error('رمز عبور اشتباه است ❌');
+
+        Swal.fire({ title: 'در حال ریست کامل صندوق...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+
+        const { data: ok, error } = await supabaseClient.rpc('danger_zone_reset_pool');
+        if (error) throw error;
+        if (!ok) throw new Error('اجازه‌ی این عملیات رو ندارید.');
+
+        await Swal.fire({ title: 'صندوق کامل ریست شد ✅', text: 'همه‌چیز از صفر شروع میشه.', icon: 'success', confirmButtonColor: '#10b981' });
+        location.reload();
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
+    }
+};
+
+/************************************************
+ * پشتیبان‌گیری و بازیابی کامل اطلاعات صندوق
+ ************************************************/
+const BACKUP_TABLES = ['pools', 'settings', 'members', 'transactions', 'loans', 'coin_requests',
+    'admin_news', 'admin_polls', 'poll_votes', 'loan_votes', 'projects',
+    'sub_requests', 'turn_swap_requests', 'lottery_results', 'profit_distributions'];
+
+window.backupPoolData = async function() {
+    const poolId = sessionStorage.getItem('pool_id');
+    if (!poolId) return;
+
+    Swal.fire({ title: 'در حال آماده‌سازی نسخه پشتیبان...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+
+    try {
+        const backup = { backup_version: 1, pool_id: Number(poolId), created_at: new Date().toISOString(), data: {} };
+
+        for (const table of BACKUP_TABLES) {
+            if (table === 'poll_votes') {
+                // poll_votes ستون pool_id مستقیم نداره، باید از طریق admin_polls فیلتر بشه
+                const pollIds = (backup.data.admin_polls || []).map(p => p.id);
+                if (pollIds.length === 0) { backup.data.poll_votes = []; continue; }
+                const { data, error } = await supabaseClient.from('poll_votes').select('*').in('poll_id', pollIds);
+                if (error) throw new Error(`خطا در خوندن جدول poll_votes: ${error.message}`);
+                backup.data.poll_votes = data || [];
+                continue;
+            }
+            const filterCol = table === 'pools' ? 'id' : 'pool_id';
+            const { data, error } = await supabaseClient.from(table).select('*').eq(filterCol, poolId);
+            if (error) throw new Error(`خطا در خوندن جدول ${table}: ${error.message}`);
+            backup.data[table] = data || [];
+        }
+
+        const jsonStr = JSON.stringify(backup, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const poolName = (backup.data.pools[0]?.pool_code || 'pool');
+        a.href = url;
+        a.download = `ebank-backup-${poolName}-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        Swal.fire({ title: 'نسخه پشتیبان دانلود شد ✅', icon: 'success' });
+    } catch (e) {
+        Swal.fire({ title: 'خطا در پشتیبان‌گیری', text: e.message, icon: 'error' });
+    }
+};
+
+window.restorePoolData = async function(event) {
+    const file = event.target.files[0];
+    event.target.value = ''; // برای اینکه انتخاب دوباره‌ی همون فایل هم کار کنه
+    if (!file) return;
+
+    const poolId = sessionStorage.getItem('pool_id');
+    if (!poolId) return;
+
+    try {
+        const text = await file.text();
+        const backup = JSON.parse(text);
+        if (!backup?.data) throw new Error('این فایل یه نسخه‌ی پشتیبان معتبر نیست.');
+
+        const confirmResult = await Swal.fire({
+            title: 'تایید بازیابی اطلاعات',
+            html: `<p style="font-size:12px; line-height:1.9;">این کار اطلاعات موجود <b>همین صندوق فعلی</b> رو با محتوای فایل پشتیبان (مربوط به تاریخ ${new Date(backup.created_at).toLocaleDateString('fa-IR')}) جایگزین می‌کنه.</p>
+                   <p style="font-size:9px; color:#94a3b8; margin-top:8px;">توجه: اگه اکانت ورود (auth) یه عضو قبلاً حذف شده باشه، دیتای اون عضو برمی‌گرده ولی امکان ورودش نیاز به ثبت‌نام دوباره داره.</p>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'بله، بازیابی کن',
+            cancelButtonText: 'انصراف',
+            confirmButtonColor: '#4f46e5',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+        if (!confirmResult.isConfirmed) return;
+
+        Swal.fire({ title: 'در حال بازیابی...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+
+        const results = [];
+        // pools و settings اول (بقیه‌ی جدول‌ها به pool_id وابسته‌ن)
+        const orderedTables = ['pools', 'settings', 'members', ...BACKUP_TABLES.filter(t => !['pools', 'settings', 'members'].includes(t))];
+
+        for (const table of orderedTables) {
+            const rows = backup.data[table];
+            if (!rows || rows.length === 0) continue;
+            const { error } = await supabaseClient.from(table).upsert(rows, { onConflict: 'id' });
+            results.push({ table, ok: !error, msg: error?.message });
+        }
+
+        const failed = results.filter(r => !r.ok);
+        if (failed.length === 0) {
+            await Swal.fire({ title: 'بازیابی کامل شد ✅', icon: 'success' });
+        } else {
+            await Swal.fire({
+                title: 'بازیابی با چند خطا تموم شد',
+                html: failed.map(f => `<p style="font-size:10px;">جدول <b>${f.table}</b>: ${escapeHtml(f.msg || '')}</p>`).join(''),
+                icon: 'warning'
+            });
+        }
+
+        location.reload();
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا در بازیابی', text: e.message, icon: 'error' });
+    }
+};
+
 function updateAccordionDot(dotId, count) {
     const dot = document.getElementById(dotId);
     if (!dot) return;
@@ -907,18 +1321,77 @@ async function checkMonthlyLoanWarning(poolId) {
     } catch (e) { console.error("Error checking monthly loan warning:", e); }
 }
 
+/************************************************
+ * پیش‌نمایش سریع صندوق‌ها در تب هوم (کلیک روی کارت)
+ ************************************************/
+async function loadLoanFundQuickview() {
+    const el = document.getElementById('loan-fund-quickview-content');
+    if (!el) return;
+    el.innerHTML = '<p class="text-slate-400 text-[10px]">در حال بارگذاری...</p>';
+
+    const poolId = sessionStorage.getItem('pool_id');
+    try {
+        const { data: members } = await supabaseClient.from('members').select('*').eq('pool_id', poolId).eq('is_admin', false);
+        const { data: txs } = await supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved');
+
+        const queue = (members || []).map(m => {
+            const userIn = txs.filter(t => t.member_id === m.id && t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
+            const userOutMonthly = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
+            return { ...m, isEligible: (userOutMonthly - userIn) <= 0 };
+        }).filter(m => m.isEligible)
+          .sort((a, b) => new Date(a.eligible_at || 0) - new Date(b.eligible_at || 0));
+
+        if (queue.length === 0) {
+            el.innerHTML = '<p class="text-slate-400 text-[10px]">فعلاً کسی واجد شرایط دریافت وام نیست.</p>';
+            return;
+        }
+        const first = queue[0];
+        el.innerHTML = `
+            <div class="flex items-center justify-between bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
+                <span class="text-xs font-black text-slate-800">${escapeHtml(first.full_name)}</span>
+                <button onclick="payStandardLoan('${first.id}', '${escapeHtml(first.full_name).replace(/'/g, "\\'")}')" class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[9px] font-black active:scale-95">پرداخت وام</button>
+            </div>`;
+    } catch (e) { el.innerHTML = '<p class="text-rose-400 text-[10px]">خطا در بارگذاری صف.</p>'; }
+}
+
+async function loadInvestFundQuickview() {
+    const el = document.getElementById('invest-fund-quickview-content');
+    if (!el) return;
+    const poolId = sessionStorage.getItem('pool_id');
+    try {
+        const { data: projects } = await supabaseClient.from('projects').select('*').eq('pool_id', poolId);
+        const count = projects?.length || 0;
+        el.innerHTML = count > 0
+            ? `<p class="text-slate-600 text-[10px] font-bold">${count} پروژه فعال با این صندوق راه‌اندازی شده.</p>`
+            : `<p class="text-slate-400 text-[10px]">هنوز پروژه‌ای با این صندوق افتتاح نشده.</p>`;
+    } catch (e) { el.innerHTML = '<p class="text-rose-400 text-[10px]">خطا در بارگذاری.</p>'; }
+}
+
+async function loadProfitFundQuickview() {
+    const el = document.getElementById('profit-fund-quickview-content');
+    if (!el) return;
+    const poolId = sessionStorage.getItem('pool_id');
+    try {
+        const { data: dists } = await supabaseClient.from('transactions').select('amount').eq('pool_id', poolId).eq('status', 'approved').eq('type', 'distribution');
+        const total = (dists || []).reduce((s, a) => s + Number(a.amount), 0);
+        el.innerHTML = dists && dists.length > 0
+            ? `<p class="text-slate-600 text-[10px] font-bold">تا الان ${total.toLocaleString()} تومان سود بین اعضا توزیع شده.</p>`
+            : `<p class="text-slate-400 text-[10px]">هنوز سودی بین اعضا توزیع نشده.</p>`;
+    } catch (e) { el.innerHTML = '<p class="text-rose-400 text-[10px]">خطا در بارگذاری.</p>'; }
+}
+
 function toggleCollapsiblePanel(panelId, event) {
     if (event) event.stopPropagation();
     const panel = document.getElementById(panelId);
     if (!panel) return;
-    const wasHidden = panel.classList.contains('hidden');
-    document.querySelectorAll('.js-collapsible-panel').forEach(p => p.classList.add('hidden'));
-    if (wasHidden) panel.classList.remove('hidden');
+    const wasOpen = panel.classList.contains('panel-open');
+    document.querySelectorAll('.js-collapsible-panel').forEach(p => p.classList.remove('panel-open'));
+    if (!wasOpen) panel.classList.add('panel-open');
 }
 
 document.addEventListener('click', function(e) {
-    document.querySelectorAll('.js-collapsible-panel:not(.hidden)').forEach(panel => {
-        if (!panel.contains(e.target)) panel.classList.add('hidden');
+    document.querySelectorAll('.js-collapsible-panel.panel-open').forEach(panel => {
+        if (!panel.contains(e.target)) panel.classList.remove('panel-open');
     });
 });
 
@@ -1467,6 +1940,7 @@ window.saveNewAmounts = async function() {
     const btn = document.getElementById('save-settings-btn');
     
     // گرفتن مقادیر
+    const monthlyLoanAmt = document.getElementById('set-monthly-loan-amount')?.value;
     const b = document.getElementById('set-base-amount').value;
     const w = document.getElementById('set-won-amount').value;
     const n = document.getElementById('set-invest-percent').value;
@@ -1486,6 +1960,7 @@ window.saveNewAmounts = async function() {
     try {
         // ۱. آپدیت جدول تنظیمات
         await supabaseClient.from('settings').update({ 
+            monthly_loan_amount: monthlyLoanAmt !== undefined ? Number(monthlyLoanAmt) : undefined,
             base_amount: Number(b), 
             won_amount: Number(w), 
             investment_percent: Number(n),
@@ -1539,11 +2014,13 @@ async function loadCurrentConfig(poolId) {
             .maybeSingle();
 
         if (settings) { 
+            const monthlyLoanInput = document.getElementById('set-monthly-loan-amount');
             const baseInput = document.getElementById('set-base-amount');
             const wonInput = document.getElementById('set-won-amount');
             const investInput = document.getElementById('set-invest-percent');
 
             // فقط اگر المان در صفحه وجود داشت، مقداردهی کن 👇
+            if (monthlyLoanInput) monthlyLoanInput.value = settings.monthly_loan_amount || 80000000;
             if (baseInput) baseInput.value = settings.base_amount || 0; 
             if (wonInput) wonInput.value = settings.won_amount || 0; 
             if (investInput) investInput.value = settings.investment_percent || 0;
@@ -2136,6 +2613,19 @@ window.addNewMember = async function() {
     // ✅ شرط سهم: حتماً باید عدد باشد و حداقل ۱
     if (isNaN(shares) || shares < 1) {
         return Swal.fire({text: "تعداد سهم باید حداقل ۱ باشد", icon:'warning'});
+    }
+
+    // ✅ چک سهمیه‌ی باقی‌مانده‌ی صندوق قبل از هر ثبتی
+    const { data: poolNow, error: poolErr } = await supabaseClient.from('pools').select('member_capacity').eq('id', poolId).single();
+    if (poolErr) return Swal.fire({ title: 'خطا', text: 'دریافت سهمیه‌ی صندوق ممکن نشد.', icon: 'error' });
+    if (shares > Number(poolNow.member_capacity)) {
+        return Swal.fire({
+            title: 'سهمیه کافی نیست',
+            text: `سهمیه‌ی باقی‌مانده‌ی صندوق ${poolNow.member_capacity} سهمه، ولی ${shares} سهم درخواست کردی.`,
+            icon: 'error',
+            confirmButtonColor: '#e11d48',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
     }
 
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> در حال ثبت...'; }
@@ -3088,12 +3578,16 @@ window.loadLoanQueue = async function(poolId) {
 window.payStandardLoan = async function(memberId, memberName) {
     const poolId = sessionStorage.getItem('pool_id');
 
+    // مبلغ پیش‌فرض رو از تنظیمات صندوق می‌گیریم، نه یه عدد ثابت
+    const { data: loanSettings } = await supabaseClient.from('settings').select('monthly_loan_amount').eq('pool_id', poolId).maybeSingle();
+    const defaultLoanAmount = loanSettings?.monthly_loan_amount || 80000000;
+
     // ۱. تایید مبلغ و عملیات
     const { value: amount } = await Swal.fire({
         title: 'پرداخت وام نوبتی',
         html: `<p style="font-size:12px; color:#64748b;">واریز وام ماهانه برای: <b>${memberName}</b></p>`,
         input: 'number',
-        inputValue: '80000000', // مبلغ فرضی ۸۰ میلیون
+        inputValue: String(defaultLoanAmount),
         showCancelButton: true,
         confirmButtonText: 'تایید و کسر از صندوق',
         confirmButtonColor: '#4f46e5',
@@ -3111,6 +3605,28 @@ window.payStandardLoan = async function(memberId, memberName) {
         return Swal.fire({
             title: 'خارج از بازه‌ی مجاز',
             text: 'پرداخت وام نوبتی فقط تا پنجم هر ماه امکان‌پذیره. برای این ماه دیر شده، ماه بعد اقدام کنید.',
+            icon: 'warning',
+            confirmButtonColor: '#4f46e5',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+    }
+
+    // فقط یک‌بار در ماه: اگه وام نوبتی همین ماه قبلاً پرداخت شده، اجازه‌ی پرداخت دوباره نده
+    const firstDayOfThisMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    const { data: alreadyPaidThisMonth } = await supabaseClient
+        .from('transactions')
+        .select('id, members(full_name)')
+        .eq('pool_id', poolId)
+        .eq('status', 'approved')
+        .eq('type', 'out')
+        .eq('category', 'monthly')
+        .gte('created_at', firstDayOfThisMonth)
+        .limit(1);
+
+    if (alreadyPaidThisMonth && alreadyPaidThisMonth.length > 0) {
+        return Swal.fire({
+            title: 'وام نوبتی این ماه قبلاً پرداخت شده',
+            text: `وام ماهانه فقط یک‌بار در ماه قابل پرداخته و این ماه قبلاً به ${alreadyPaidThisMonth[0].members?.full_name || 'یک عضو'} پرداخت شده. ماه بعد اقدام کنید.`,
             icon: 'warning',
             confirmButtonColor: '#4f46e5',
             customClass: { popup: 'rounded-[2.5rem]' }
@@ -3650,12 +4166,11 @@ async function loadAllMembers(poolId) {
         const todaysOffset = Math.abs(diffToNext) < Math.abs(diffToThis) ? diffToNext : diffToThis;
         const inCoinDeductionZone = todaysOffset > half;
 
-        // مرتب‌سازی (مدیر اول، بعد بر اساس نام)
-        const sorted = members.sort((a, b) => {
-            if (a.is_admin && !b.is_admin) return -1;
-            if (!a.is_admin && b.is_admin) return 1;
-            return a.full_name.localeCompare(b.full_name);
-        });
+        // مدیر دیگه لازم نیست تو لیست اعضا نشون داده بشه (حساب مدیریتی جداست، نه یه عضو مالی)
+        const filtered = members.filter(m => !m.is_admin);
+
+        // مرتب‌سازی بر اساس نام
+        const sorted = filtered.sort((a, b) => a.full_name.localeCompare(b.full_name));
         
         allMembersData = sorted;
 

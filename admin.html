@@ -173,6 +173,39 @@
     border-radius: 10px;
 }
 
+/* گزارش قابل چاپ تراکنش‌ها با واترمارک E.BANK — فقط موقع پرینت/PDF دیده میشه */
+#print-report { display: none; }
+@media print {
+    body * { visibility: hidden; }
+    #print-report, #print-report * { visibility: visible; }
+    #print-report { display: block; position: absolute; top: 0; right: 0; width: 100%; direction: rtl; }
+    #print-report .watermark {
+        position: fixed; top: 40%; left: 0; width: 100%; text-align: center;
+        font-size: 90px; font-weight: 900; color: rgba(15, 23, 42, 0.08);
+        transform: rotate(-25deg); z-index: -1; letter-spacing: 10px;
+    }
+}
+/* پنل‌های کشویی با انیمیشن نرم (به‌جای مخفی/نمایان ناگهانی) */
+.js-collapsible-panel {
+    max-height: 0 !important;
+    opacity: 0;
+    overflow: hidden;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-width: 0 !important;
+    transform: translateY(-8px);
+    transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, transform 0.3s ease, margin-bottom 0.4s ease, padding 0.4s ease, border-width 0.4s ease;
+}
+.js-collapsible-panel.panel-open {
+    max-height: 600px !important;
+    opacity: 1;
+    margin-bottom: 1rem !important;
+    padding-top: 1.5rem !important;
+    padding-bottom: 1.5rem !important;
+    border-width: 1px !important;
+    transform: translateY(0);
+}
 </style>
 
 
@@ -195,19 +228,20 @@
     <!-- منوی کشویی تنظیمات (Drawer) -->
     <div id="admin-drawer" class="fixed inset-0 z-[1000] invisible">
         <div id="drawer-overlay" onclick="toggleDrawer(false)" class="absolute inset-0 bg-slate-950/40 backdrop-blur-sm opacity-0 transition-opacity duration-300"></div>
-        <div id="drawer-content" class="absolute top-0 right-0 h-full w-[80%] bg-white shadow-2xl translate-x-full transition-transform duration-300 flex flex-col p-8">
+        <div id="drawer-content" class="absolute top-0 right-0 h-full w-[80%] bg-white shadow-2xl translate-x-full transition-transform duration-300 flex flex-col p-8 overflow-y-auto">
             <h3 class="font-black text-slate-800 text-lg mb-8 border-b pb-4 text-right">تنظیمات اصلی</h3>
             
             <!-- بخش اشتراک در منوی کشویی -->
-<div class="bg-indigo-50/50 p-5 rounded-[2rem] border border-indigo-100 mb-6 mt-2">
+<div id="sub-plan-card" class="bg-indigo-50/50 p-5 rounded-[2rem] border border-indigo-100 mb-6 mt-2 transition-colors duration-500">
     <div class="flex justify-between items-center mb-4">
-        <p class="text-[9px] font-black text-indigo-600 uppercase">Subscription Plan</p>
+        <p id="sub-plan-label" class="text-[9px] font-black text-indigo-600 uppercase">Subscription Plan</p>
         <i class="fas fa-crown text-indigo-400 text-xs"></i>
     </div>
-    <div class="flex items-end gap-1 mb-4">
+    <div class="flex items-end gap-1 mb-2">
         <h4 id="sub-days-left-large" class="text-2xl font-black text-slate-800">--</h4>
         <span class="text-[10px] text-slate-400 font-bold mb-1">روز اعتبار باقی‌مانده</span>
     </div>
+    <p id="sub-warning-text" class="hidden text-[9px] font-black text-rose-600 leading-relaxed mb-3"></p>
     <!-- دکمه تمدید -->
     <button onclick="openRenewalModal()" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-black text-[10px] shadow-lg shadow-indigo-200 active:scale-95 transition-all">
         تمدید اعتبار پنل
@@ -221,14 +255,41 @@
                 
              <!-- دکمه اصلاح شده یادآوری به بدهکاران (هماهنگ با بقیه دکمه‌ها) -->
 <button onclick="sendPushToUnpaid()" class="w-full p-4 rounded-2xl bg-slate-50 text-orange-600 text-xs font-black flex items-center justify-between active:scale-95 transition-all border border-transparent active:border-orange-100">
-    <i class="fas fa-bell"></i>
     <span class="flex-1 text-right pr-2">یادآوری اقساط به بدهکاران</span>
-    
+    <div class="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center shadow-sm">
+        <i class="fas fa-bell"></i>
+    </div>
 </button>
                 
                 
                 
                 
+                <button onclick="backupPoolData()" class="w-full p-4 rounded-2xl bg-slate-50 text-emerald-600 text-xs font-black flex items-center gap-3">
+                    <i class="fas fa-cloud-download-alt"></i> پشتیبان‌گیری از همه اطلاعات
+                </button>
+                <input type="file" id="restore-file-input" accept="application/json" class="hidden" onchange="restorePoolData(event)">
+                <button onclick="document.getElementById('restore-file-input').click()" class="w-full p-4 rounded-2xl bg-slate-50 text-indigo-600 text-xs font-black flex items-center gap-3">
+                    <i class="fas fa-cloud-upload-alt"></i> بازیابی اطلاعات از فایل پشتیبان
+                </button>
+
+                <button onclick="switchToMemberPanel()" class="w-full p-4 rounded-2xl bg-indigo-50 text-indigo-700 text-xs font-black flex items-center gap-3">
+                    <i class="fas fa-right-left"></i> جابجایی به پنل عضویت شخصی
+                </button>
+                <p class="text-[8px] text-slate-400 leading-relaxed px-1 -mt-2">
+                    برای شرکت در صندوق به‌عنوان یک عضو عادی، اول از تب Users با یه شماره‌ی متفاوت (نه شماره‌ی مدیریتی) خودتو ثبت‌نام کن، بعد همینجا وصلش کن.
+                </p>
+
+                <button onclick="openReportIssueModal()" class="w-full p-4 rounded-2xl bg-slate-50 text-slate-700 text-xs font-black flex items-center gap-3">
+                    <i class="fas fa-bug text-amber-500"></i> گزارش مشکل / پیشنهاد
+                </button>
+
+                <!-- منطقه‌ی خطر -->
+                <div class="border-2 border-dashed border-rose-200 rounded-2xl p-1 mt-2">
+                    <button onclick="openDangerZoneReset()" class="w-full p-4 rounded-2xl bg-rose-50 text-rose-700 text-xs font-black flex items-center gap-3">
+                        <i class="fas fa-radiation"></i> منطقه خطر: ریست کامل صندوق
+                    </button>
+                </div>
+
                 <button onclick="handleLogout()" class="w-full p-4 rounded-2xl bg-rose-50 text-rose-600 text-xs font-black flex items-center gap-3 mt-auto">
                     <i class="fas fa-power-off"></i> خروج از مدیریت
                 </button>
@@ -274,10 +335,11 @@
     </div>
 
     <!-- گرید ۳ صندوق اصلی (بازگشت پرقدرت صندوق‌ها) 👇 -->
-    <div class="grid grid-cols-1 gap-4">
+    <div class="grid grid-cols-1 gap-0">
         
-        <!-- صندوق اول: نقدینگی جاری (صندوق وام) -->
-        <div class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden">
+        <!-- صندوق اول: نقدینگی جاری (صندوق وام) — کلیک، نفر اول صف رو نشون میده -->
+        <div>
+        <div onclick="toggleCollapsiblePanel('loan-fund-quickview', event); loadLoanFundQuickview();" class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden cursor-pointer active:scale-[0.99] transition-all mb-4">
             <div class="flex items-center gap-4">
                 <div class="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center shadow-inner">
                     <i class="fas fa-hand-holding-dollar text-xl"></i>
@@ -291,12 +353,18 @@
                 <h3 id="main-fund-balance" class="text-base font-black text-indigo-600">۰ تومان</h3>
             </div>
         </div>
+        <div id="loan-fund-quickview" class="js-collapsible-panel bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+            <p class="text-[8px] text-slate-400 font-black uppercase mb-3">نفر اول صف نوبت</p>
+            <div id="loan-fund-quickview-content" class="text-center py-3 text-slate-400 text-[10px]">در حال بارگذاری...</div>
+        </div>
+        </div>
 
-        <!-- صندوق دوم: سرمایه‌گذاری (پشتیبان خرید پروژه) -->
-        <div class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden">
+        <!-- صندوق دوم: سرمایه‌گذاری (پشتیبان خرید پروژه) — کلیک، خلاصه‌ی پروژه‌ها رو نشون میده -->
+        <div>
+        <div onclick="toggleCollapsiblePanel('invest-fund-quickview', event); loadInvestFundQuickview();" class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden cursor-pointer active:scale-[0.99] transition-all mb-4">
             <div class="flex items-center gap-4">
                 <div class="w-14 h-14 bg-purple-50 text-purple-600 rounded-3xl flex items-center justify-center shadow-inner">
-                  <i class="fas fa-chart-line text-xl"></i>
+                    <i class="fas fa-chart-line-up text-xl"></i>
                 </div>
                 <div>
                     <h4 class="text-xs font-[900] text-slate-800">صندوق سرمایه‌گذاری</h4>
@@ -307,9 +375,16 @@
                 <h3 id="invest-fund-balance" class="text-base font-black text-purple-600">۰ تومان</h3>
             </div>
         </div>
+        <div id="invest-fund-quickview" class="js-collapsible-panel bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+            <p class="text-[8px] text-slate-400 font-black uppercase mb-3">این صندوق صرف پروژه‌ها میشه</p>
+            <div id="invest-fund-quickview-content" class="text-center py-3 text-slate-400 text-[10px]">در حال بارگذاری...</div>
+            <button onclick="showAdminSec(null,'admin-biz-sec')" class="w-full mt-3 bg-purple-50 text-purple-600 py-3 rounded-2xl font-black text-[9px]">مدیریت پروژه‌ها</button>
+        </div>
+        </div>
 
-        <!-- صندوق سوم: سود خالص (درآمدهای بازار) -->
-        <div class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden">
+        <!-- صندوق سوم: سود خالص (درآمدهای بازار) — کلیک، خلاصه‌ی سود توزیع‌شده رو نشون میده -->
+        <div>
+        <div onclick="toggleCollapsiblePanel('profit-fund-quickview', event); loadProfitFundQuickview();" class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden cursor-pointer active:scale-[0.99] transition-all mb-4">
             <div class="flex items-center gap-4">
                 <div class="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center shadow-inner">
                     <i class="fas fa-sack-dollar text-xl"></i>
@@ -323,9 +398,16 @@
                 <h3 id="profit-fund-balance" class="text-base font-black text-emerald-600">۰ تومان</h3>
             </div>
         </div>
+        <div id="profit-fund-quickview" class="js-collapsible-panel bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+            <p class="text-[8px] text-slate-400 font-black uppercase mb-3">توزیع سود بین اعضا</p>
+            <div id="profit-fund-quickview-content" class="text-center py-3 text-slate-400 text-[10px]">در حال بارگذاری...</div>
+            <button onclick="showAdminSec(null,'admin-biz-sec')" class="w-full mt-3 bg-emerald-50 text-emerald-600 py-3 rounded-2xl font-black text-[9px]">رفتن به پروژه‌ها برای توزیع سود</button>
+        </div>
+        </div>
 
         <!-- صندوق چهارم: خیریه (کلیک روی کارت، فرم برداشت رو باز/بسته می‌کنه) -->
-        <div onclick="toggleCollapsiblePanel('charity-withdraw-panel', event)" class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden cursor-pointer active:scale-[0.99] transition-all">
+        <div>
+        <div onclick="toggleCollapsiblePanel('charity-withdraw-panel', event)" class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-between relative overflow-hidden cursor-pointer active:scale-[0.99] transition-all mb-4">
             <div class="flex items-center gap-4">
                 <div class="w-14 h-14 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center shadow-inner">
                     <i class="fas fa-hand-holding-heart text-xl"></i>
@@ -341,11 +423,12 @@
         </div>
 
         <!-- برداشت مدیر از خیریه (کشویی) -->
-        <div id="charity-withdraw-panel" class="js-collapsible-panel hidden bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-3">
+        <div id="charity-withdraw-panel" class="js-collapsible-panel bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-3">
             <h4 class="text-xs font-[900] text-slate-800 flex items-center gap-2"><i class="fas fa-hand-holding-heart text-rose-500"></i> برداشت از خیریه</h4>
             <input type="number" id="charity-withdraw-amount" placeholder="مبلغ برداشت (تومان)" class="w-full p-4 bg-slate-50 rounded-2xl text-xs font-black outline-none border-none">
             <input type="text" id="charity-withdraw-desc" placeholder="بابت چی / برای کی" class="w-full p-4 bg-slate-50 rounded-2xl text-xs font-black outline-none border-none">
             <button onclick="withdrawFromCharity()" class="w-full bg-rose-500 text-white py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95">ثبت برداشت از خیریه</button>
+        </div>
         </div>
 
     </div>
@@ -445,15 +528,21 @@
             <i id="icon-ops-tx" class="fas fa-chevron-down text-slate-300 transition-transform"></i>
         </div>
         <div id="ops-group-transactions" class="max-h-0 overflow-hidden transition-all duration-500">
-            <div class="px-6 pt-0 pb-3 flex gap-2">
+            <div class="px-6 pt-0 pb-3 flex gap-2 flex-wrap">
                 <input type="text" id="tx-log-search" oninput="renderTransactionLog()" placeholder="جستجوی نام عضو..." 
-                    class="flex-1 p-3 bg-slate-50 rounded-2xl text-[10px] font-bold outline-none border-none">
+                    class="flex-1 min-w-[120px] p-3 bg-slate-50 rounded-2xl text-[10px] font-bold outline-none border-none">
                 <select id="tx-log-type-filter" onchange="renderTransactionLog()" 
                     class="p-3 bg-slate-50 rounded-2xl text-[10px] font-bold outline-none border-none">
                     <option value="all">همه</option>
                     <option value="in">فقط واریز</option>
                     <option value="out">فقط برداشت</option>
                 </select>
+                <button onclick="exportTransactionsPDF()" class="px-3 bg-rose-50 text-rose-600 rounded-2xl text-[10px] font-black flex items-center gap-1">
+                    <i class="fas fa-file-pdf"></i> PDF
+                </button>
+                <button onclick="exportTransactionsExcel()" class="px-3 bg-emerald-50 text-emerald-600 rounded-2xl text-[10px] font-black flex items-center gap-1">
+                    <i class="fas fa-file-excel"></i> Excel
+                </button>
             </div>
             <div id="admin-transactions-log" class="p-6 pt-0 space-y-3 max-h-[65vh] overflow-y-auto">
                 <!-- لاگ تراکنش‌ها توسط JS اینجا لود می‌شود -->
@@ -483,7 +572,7 @@
         <button onclick="toggleCollapsiblePanel('proj-form-panel', event)" class="btn-tap w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-xs shadow-lg shadow-indigo-100 flex items-center justify-center gap-2">
             <i class="fas fa-plus-circle"></i> افتتاح پروژه جدید
         </button>
-        <div id="proj-form-panel" class="js-collapsible-panel hidden bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-3">
+        <div id="proj-form-panel" class="js-collapsible-panel bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-3">
             <input type="text" id="proj-name" placeholder="نام پروژه (مثلاً خرید طلا)" 
                 class="w-full p-4 bg-slate-50 rounded-2xl text-xs font-bold outline-none border-none focus:ring-2 focus:ring-indigo-100">
             
@@ -518,6 +607,9 @@
             </div>
         </div>
     </div>
+    <div id="members-list" class="space-y-1 pb-24"></div>
+</section>
+
 <!-- ====================================================== -->
 <!-- مودال افزودن عضو جدید (نسخه پاپ‌آپ با اسکرول) -->
 <!-- ====================================================== -->
@@ -525,7 +617,7 @@
     <!-- پس‌زمینه تیره -->
     <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-md" onclick="closeAddMemberModal()"></div>
     
-    <div class="relative bg-white w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-[3rem] p-6 shadow-2xl animate__animated animate__zoomIn">
+    <div class="relative bg-white w-full max-w-sm max-h-[85dvh] overflow-y-auto rounded-[3rem] p-6 shadow-2xl animate__animated animate__zoomIn">
         
         <div class="text-center mb-4">
             <h4 class="font-black text-slate-800 text-lg">ثبت عضو جدید</h4>
@@ -598,8 +690,6 @@
     </div>
 </div>
 
-    <div id="members-list" class="space-y-1 pb-24"></div>
-</section>
 
 <!-- مودال خرید سهمیه (اصلاح شده با فیلد عکس) -->
 <div id="quota-modal" class="hidden fixed inset-0 z-[800] flex items-center justify-center p-6">
@@ -702,6 +792,10 @@
         </div>
         <div id="set-group-1" class="max-h-0 overflow-hidden transition-all duration-500">
             <div class="p-6 pt-0 space-y-4">
+                <div class="bg-rose-50/50 p-4 rounded-2xl border border-rose-100">
+                    <label class="text-[8px] text-rose-600 font-black block mb-1 uppercase">Monthly Loan Amount</label>
+                    <input type="number" id="set-monthly-loan-amount" class="w-full bg-transparent border-none outline-none font-black text-rose-800 text-sm">
+                </div>
                 <div class="bg-slate-50 p-4 rounded-2xl border border-transparent focus-within:border-indigo-200 transition-all">
                     <label class="text-[8px] text-slate-400 font-black block mb-1 uppercase">Standard Installment</label>
                     <input type="number" id="set-base-amount" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
@@ -714,6 +808,12 @@
                     <label class="text-[8px] text-indigo-600 font-black block mb-1 uppercase">Investment Share (N%)</label>
                     <input type="number" id="set-invest-percent" placeholder="درصد کسر سرمایه" class="w-full bg-transparent border-none outline-none font-black text-indigo-800 text-sm">
                 </div>
+                <p class="text-[8px] text-slate-400 leading-relaxed px-1">
+                    وام ماهانه: مبلغی که هر ماه به نفر واجدشرایط صف پرداخت میشه.
+                    قسط استاندارد: مبلغی که هر عضو باید به‌ازای هر سهم، ماهانه واریز کنه.
+                    قسط برنده: مبلغ بازپرداخت ماهانه‌ی کسی که وام نوبتی گرفته.
+                    درصد سرمایه: چند درصد از هر واریزی تاییدشده، خودکار میره تو صندوق سرمایه‌گذاری.
+                </p>
             </div>
         </div>
     </div>
@@ -749,6 +849,12 @@
                     <label class="text-[8px] text-rose-600 font-black block mb-1 uppercase">شرکت در خیریه — هر n تومان، ۱ سکه</label>
                     <input type="number" id="set-coin-charity-rate" placeholder="مثلاً ۱۰۰۰۰" class="w-full bg-transparent border-none outline-none font-black text-rose-800 text-sm">
                 </div>
+                <p class="text-[8px] text-slate-400 leading-relaxed px-1">
+                    سکه/روز: هر روزی که به یکم مونده یا از یکم گذشته، سکه به همین اندازه بیشتر/کمتر میشه.
+                    طول پنجره: تعداد کل روزهایی که سکه گرفته میشه (نصفش قبل یکم، نصفش بعدش).
+                    همیاری: سکه‌ای که با جابجایی نوبت به نفع یه عضو دیگه گرفته میشه.
+                    قیمت سکه و نرخ خیریه برای تبدیل سکه به تومان و برعکس استفاده میشن.
+                </p>
             </div>
         </div>
     </div>
@@ -1172,5 +1278,26 @@
 </div>
 
     <script src="admin_app.js"></script>
+    <!-- گزارش قابل چاپ/PDF تراکنش‌ها (توسط JS پر میشه) -->
+    <div id="print-report">
+        <div class="watermark">E.BANK</div>
+        <div style="padding:30px; font-family:Tahoma,sans-serif;">
+            <h2 id="print-report-title" style="text-align:center; margin-bottom:4px;">گزارش تراکنش‌های صندوق</h2>
+            <p id="print-report-date" style="text-align:center; font-size:11px; color:#64748b; margin-bottom:20px;"></p>
+            <table style="width:100%; border-collapse:collapse; font-size:11px;">
+                <thead>
+                    <tr style="background:#f1f5f9;">
+                        <th style="border:1px solid #cbd5e1; padding:6px;">تاریخ</th>
+                        <th style="border:1px solid #cbd5e1; padding:6px;">نوع</th>
+                        <th style="border:1px solid #cbd5e1; padding:6px;">عضو</th>
+                        <th style="border:1px solid #cbd5e1; padding:6px;">توضیح</th>
+                        <th style="border:1px solid #cbd5e1; padding:6px;">مبلغ (تومان)</th>
+                    </tr>
+                </thead>
+                <tbody id="print-report-body"></tbody>
+            </table>
+        </div>
+    </div>
+
 </body>
 </html>

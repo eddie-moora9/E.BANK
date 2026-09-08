@@ -248,12 +248,12 @@ async function handleLogin() {
         localStorage.setItem('saved_pool_code', p);
 
         // ۸. نمایش پیام موفقیت شیک
-        Swal.fire({
+       await Swal.fire({
             title: 'ورود موفقیت‌آمیز ✅',
             text: `خوش آمدید ${prof.full_name}`,
             icon: 'success',
             showConfirmButton: false,
-            timer: 1200,
+            timer: 3000,
             customClass: { popup: 'rounded-[2.5rem]' }
         });
 
