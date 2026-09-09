@@ -50,7 +50,7 @@
             <div class="w-16 h-16 bg-emerald-500 rounded-2xl shadow-xl shadow-emerald-100 flex items-center justify-center text-white mx-auto mb-4">
                 <i class="fas fa-university text-2xl"></i>
             </div>
-            <h2 class="text-2xl font-[900] text-slate-800 tracking-tighter">E<span id="secret-dot" class="text-emerald-600 cursor-pointer" style="display:inline-block; width:20px; text-align:center; user-select:none; -webkit-user-select:none; -moz-user-select:none; -webkit-touch-callout:none; touch-action:manipulation;">.</span>BANK</h2>
+            <h2 class="text-2xl font-[900] text-slate-800 tracking-tighter">E<span class="text-emerald-600">.</span>BANK</h2>
             <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">Secure Access Portal</p>
         </div>
 
@@ -77,7 +77,7 @@
 
     <div class="w-full text-center mt-auto py-10 relative z-10">
         <p class="text-[8px] font-black text-slate-300 uppercase tracking-[0.3em]">
-            Designed & Developed by <span id="secret-eddie" class="text-emerald-600 cursor-pointer" style="padding:5px; user-select:none; -webkit-user-select:none; -moz-user-select:none; -webkit-touch-callout:none; touch-action:manipulation;">EDDIE</span>
+            Designed & Developed by <span class="text-emerald-600">EDDIE</span>
         </p>
     </div>
 
@@ -101,97 +101,8 @@ const supabaseClient = supabase.createClient(S_URL, S_KEY, {
     }
 });
 
-// بخش اول: ورود و امنیت (خوانا)
-async function hashPassword(p) {
-    const b = new TextEncoder().encode(p);
-    const h = await crypto.subtle.digest('SHA-256', b);
-    return Array.from(new Uint8Array(h)).map(x => x.toString(16).padStart(2,'0')).join('');
-}
-
-async function openMasterLoginGate() {
-    const { value: p } = await Swal.fire({ title: 'COMMAND CENTER', input: 'password', confirmButtonColor: '#fbbf24', allowOutsideClick: false, customClass: { popup: 'rounded-[2.5rem] glass-card' } });
-    if (p) {
-        const { data: v } = await supabaseClient.rpc('verify_master_access', { input_password: p });
-        if (v === true) {
-            const { value: o } = await Swal.fire({ title: 'SECURITY CHALLENGE', text: 'فرمول ساعت را وارد کنید:', input: 'text', confirmButtonColor: '#10b981', allowOutsideClick: false, customClass: { popup: 'rounded-[2.5rem] glass-card' } });
-            const { data: v2 } = await supabaseClient.rpc('verify_2fa_access', { user_provided_code: o });
-            if (v2 === true) {
-                sessionStorage.setItem('is_super_admin', 'true');
-                window.location.href = 'super_admin.html';
-            } else { Swal.fire({ text: 'کد غلط است', icon: 'error' }); }
-        } else { Swal.fire({ text: 'رمز غلط است', icon: 'error' }); }
-    }
-}
-
-// بخش دوم: موتور درگاه مخفی (نامحسوس)
-let _α = 0, _β = 0, _γ = false, _τ1 = null, _τ2 = null, _Ω = 5;
-
-// لودینگ مستقل اسپلش
-window.addEventListener('load', () => {
-    setTimeout(() => {
-        const s = document.getElementById('splash-screen');
-        if (s) { s.style.opacity = '0'; setTimeout(() => s.remove(), 700); }
-    }, 2000);
-});
-
-document.addEventListener('DOMContentLoaded', async () => {
-    // پیش‌بارگذاری عدد ثابت از دیتابیس
-    try {
-        const { data } = await supabaseClient.from('global_config').select('click_constant').eq('id', 1).maybeSingle();
-        if (data) _Ω = data.click_constant;
-    } catch(e) { _Ω = 5; }
-
-    const lp = localStorage.getItem('saved_pool_code');
-    if (lp && document.getElementById('login-pool-code')) document.getElementById('login-pool-code').value = lp;
-
-    const e = document.getElementById('secret-eddie');
-    const d = document.getElementById('secret-dot');
-
-    if (e && d) {
-        // فاز ۱: ضربه روی کلمه EDDIE
-        e.onclick = () => {
-            const val = document.getElementById('login-pool-code')?.value.trim();
-            const mt = Math.floor(new Date().getMinutes() / 10);
-            const key = (_Ω + mt).toString();
-
-            if (val !== key) { _α = 0; return; }
-            
-            _α++;
-            clearTimeout(_τ1);
-            if (_α > _Ω) { _α = 0; _γ = false; if (navigator.vibrate) navigator.vibrate(150); return; }
-
-            _τ1 = setTimeout(() => {
-                if (_α === _Ω) {
-                    _γ = true;
-                    if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
-                }
-            }, 350);
-        };
-
-        // فاز ۲: ضربه روی نقطه لوگو
-        d.onclick = () => {
-            if (!_γ) return;
-            _β++;
-            clearTimeout(_τ2);
-            const mt = Math.floor(new Date().getMinutes() / 10);
-            const target = _Ω + mt;
-
-            if (_β > target) { _α = 0; _β = 0; _γ = false; if (navigator.vibrate) navigator.vibrate(150); return; }
-
-            _τ2 = setTimeout(() => {
-                if (_β === target) {
-                    _α = 0; _β = 0; _γ = false;
-                    const c = document.getElementById('login-pool-code');
-                    if (c) c.value = '';
-                    if (navigator.vibrate) navigator.vibrate(200);
-                    openMasterLoginGate();
-                }
-            }, 350);
-        };
-    }
-});
-
-// بخش سوم: ورود اعضا
+// Super Admin authentication is intentionally isolated to super-admin-login.html.
+// بخش دوم: ورود اعضا
 async function handleLogin() {
     // ۱. دسترسی به المان‌ها
     const pI = document.getElementById('login-pool-code');
@@ -242,7 +153,6 @@ async function handleLogin() {
         sessionStorage.setItem('pool_id', prof.pool_id);
         sessionStorage.setItem('user_name', prof.full_name); // برای نمایش نام در هدر ✅
         sessionStorage.setItem('is_admin', String(prof.is_admin));
-        sessionStorage.setItem('is_super_admin', String(prof.is_super_admin));
         
         // ذخیره کد بانک برای ورودهای بعدی
         localStorage.setItem('saved_pool_code', p);
