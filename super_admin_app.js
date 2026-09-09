@@ -3,7 +3,18 @@
  ************************************************/
 var SUPABASE_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
 var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxbnNibnB6bmt3a3d1a3pva2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDc4NjgsImV4cCI6MjA4MjEyMzg2OH0.dsqyFP37JyrfYDVwasNZW_Aid9ah0e6SxdnS8j8xV5s';
-var supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// همان تنظیمات ذخیره‌سازی صفحه ورود تا Session Supabase در انتقال به
+// super_admin.html روی موبایل و مرورگر حفظ شود.
+var supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: {
+        persistSession: true,
+        storageKey: 'ebank-super-admin-session',
+        storage: window.localStorage,
+        autoRefreshToken: true,
+        detectSessionInUrl: false
+    }
+});
 
 var allPoolsCache = [];
 
@@ -23,57 +34,55 @@ window.alert = function(msg) {
  * موتور شروع به کار ستاد فرماندهی (INIT)
  ************************************************/
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('🔐 Checking dedicated Super Admin authentication...');
+    console.log('🔍 Checking Super Admin Access...');
+
+    // نشان محلی فقط مرحله ۲ را تأیید می‌کند؛ مجوز واقعی باید از Supabase Auth + members خوانده شود.
+    const twoFactorPassed = sessionStorage.getItem('super_admin_2fa') === 'true';
 
     try {
         const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
-        const stepUp = sessionStorage.getItem('super_admin_2fa') === 'true';
-        if (authError || !user || !stepUp) {
-            window.location.replace('super-admin-login.html');
-            return;
+        if (authError || !user || !twoFactorPassed) {
+            throw new Error('NO_SUPER_ADMIN_SESSION');
         }
 
         const { data: profile, error: profileError } = await supabaseClient
             .from('members')
-            .select('id, full_name, is_admin, is_super_admin, status')
+            .select('id,full_name,is_super_admin,status')
             .eq('id', user.id)
             .single();
 
         if (profileError || !profile || profile.is_super_admin !== true || profile.status === 'blocked') {
-            await supabaseClient.auth.signOut();
-            window.location.replace('super-admin-login.html');
-            return;
+            throw new Error('NO_SUPER_ADMIN_PERMISSION');
         }
 
-        console.log('✅ Super Admin identity verified:', user.id);
-        const nameEl = document.getElementById('user-name-display');
-        if (nameEl) nameEl.textContent = profile.full_name || user.email || 'E.BANK OWNER';
+        console.log('✅ 👑 مدیریت ارشد تایید شد', { user_id: user.id });
 
+        // نمایش نام کاربر
+        const userName = profile.full_name || sessionStorage.getItem('user_name') || 'E.BANK OWNER';
+        sessionStorage.setItem('user_name', userName);
+        const nameEl = document.getElementById('user-name-display');
+        if (nameEl) nameEl.textContent = userName;
+
+        // لود داده‌ها
         await loadMasterStats();
         await loadBillingHistory();
         await loadMasterCard();
 
+        console.log('✅ همه داده‌ها لود شد');
+
     } catch (err) {
-        console.error('❌ Super Admin initialization failed:', err);
+        console.error('❌ Super Admin access denied:', err);
+        sessionStorage.removeItem('super_admin_2fa');
+        sessionStorage.removeItem('user_name');
+        try { await supabaseClient.auth.signOut(); } catch (_) {}
+
         await Swal.fire({
-            title: 'خطا در احراز هویت',
-            text: 'نشست مدیریت ارشد معتبر نیست. لطفاً دوباره وارد شوید.',
-            icon: 'error',
-            confirmButtonColor: '#fbbf24'
+            title: 'نشست مدیریت منقضی یا نامعتبر است',
+            text: 'لطفاً دوباره از صفحه ورود Super Admin وارد شوید.',
+            icon: 'warning',
+            timer: 1800,
+            showConfirmButton: false
         });
-        window.location.replace('super-admin-login.html');
-    }
-});
-
-// Logout is explicit and destroys the Supabase Auth session.
-window.superAdminLogout = async function () {
-    await supabaseClient.auth.signOut();
-    sessionStorage.clear();
-    window.location.replace('super-admin-login.html');
-};
-
-supabaseClient.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT' || !session) {
         window.location.replace('super-admin-login.html');
     }
 });
@@ -285,54 +294,83 @@ window.viewSubRequests = async function(poolId, poolName) {
  * تایید هوشمند اشتراک (محاسبه دقیق بر اساس مبلغ)
  ************************************************/
 window.approveSubscription = async function(requestId, poolId, paidAmount) {
-    const { value: pw } = await Swal.fire({
-        title: 'تایید هویت', input: 'password', text: 'رمز اصلی (COMMAND CENTER) رو وارد کن',
-        confirmButtonColor: '#fbbf24', customClass: { popup: 'rounded-[2.5rem] glass-card' }
-    });
-    if (!pw) return;
-
     try {
-        const { data: result, error } = await supabaseClient.rpc('super_admin_approve_subscription', {
-            admin_password: pw,
-            request_id_param: requestId,
-            pool_id_param: poolId,
-            paid_amount: Number(paidAmount)
-        });
-        if (error) throw error;
-        if (!result?.ok) {
-            const msg = result?.reason === 'insufficient_amount' ? 'مبلغ برای حداقل یک روز کافی نیست.' : 'رمز اصلی اشتباه است.';
-            throw new Error(msg);
+        // ۱. گرفتن تنظیمات قیمت و تاریخ انقضای فعلی این صندوق
+        const { data: pool } = await supabaseClient
+            .from('pools')
+            .select('sub_expiry, sub_price, sub_duration_days')
+            .eq('id', poolId)
+            .single();
+
+        const unitPrice = Number(pool.sub_price || 100000); // قیمت یک دوره
+        const unitDays = Number(pool.sub_duration_days || 30); // طول یک دوره (مثلا ۳۰ روز)
+
+        // ۲. فرمول طلایی محاسبه روزهای تعلق گرفته 👇
+        // روزهای جایزه = (مبلغ واریزی تقسیم بر قیمت واحد) ضربدر تعداد روز واحد
+        const daysToGrant = Math.floor((Number(paidAmount) / unitPrice) * unitDays);
+
+        if (daysToGrant <= 0) {
+            return Swal.fire({ text: "مبلغ واریزی حتی برای ۱ روز اشتراک هم کافی نیست!", icon: 'error' });
         }
-        await Swal.fire({ title: 'تمدید هوشمند انجام شد', text: `اعتبار صندوق به اندازه ${result.days_granted} روز افزایش یافت.`, icon: 'success', confirmButtonColor: '#10b981' });
+
+        // ۳. محاسبه تاریخ جدید
+        let currentExpiry = new Date(pool.sub_expiry);
+        let now = new Date();
+        let startDate = currentExpiry > now ? currentExpiry : now;
+        startDate.setDate(startDate.getDate() + daysToGrant);
+
+        // ۴. بروزرسانی در دیتابیس
+        await supabaseClient.from('pools').update({
+            sub_expiry: startDate.toISOString(),
+            is_active: true
+        }).eq('id', poolId);
+
+        await supabaseClient.from('sub_requests').update({ status: 'approved' }).eq('id', requestId);
+
+        await Swal.fire({
+            title: 'تمدید هوشمند انجام شد',
+            html: `مبلغ <b>${Number(paidAmount).toLocaleString()}</b> تایید شد.<br>مطابق تعرفه، <b>${daysToGrant} روز</b> به اعتبار این صندوق اضافه گردید. ✅`,
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2.5rem] glass-card' }
+        });
+
         location.reload();
-    } catch (e) { alert('خطا در تمدید: ' + e.message); }
+    } catch (e) { alert("خطا در تمدید: " + e.message); }
 };
 
 /************************************************
  * تایید هوشمند سهمیه (محاسبه بر اساس قیمت واحد)
  ************************************************/
 window.approveMemberQuota = async function(requestId, poolId, paidAmount) {
-    const { value: pw } = await Swal.fire({
-        title: 'تایید هویت', input: 'password', text: 'رمز اصلی (COMMAND CENTER) رو وارد کن',
-        confirmButtonColor: '#fbbf24', customClass: { popup: 'rounded-[2.5rem] glass-card' }
-    });
-    if (!pw) return;
-
     try {
-        const { data: result, error } = await supabaseClient.rpc('super_admin_approve_quota', {
-            admin_password: pw,
-            request_id_param: requestId,
-            pool_id_param: poolId,
-            paid_amount: Number(paidAmount)
-        });
-        if (error) throw error;
-        if (!result?.ok) {
-            const msg = result?.reason === 'insufficient_amount' ? 'مبلغ برای خرید یک سهمیه کافی نیست.' : 'رمز اصلی اشتباه است.';
-            throw new Error(msg);
+        const { data: pool } = await supabaseClient.from('pools').select('member_capacity, share_price').eq('id', poolId).single();
+        
+        const pricePerShare = Number(pool.share_price || 10000);
+        
+        // محاسبه تعداد سهمیه‌ها 👇
+        const newSlots = Math.floor(Number(paidAmount) / pricePerShare);
+
+        if (newSlots <= 0) {
+            return Swal.fire({ text: "مبلغ برای خرید حتی ۱ سهمیه هم کافی نیست!", icon: 'error' });
         }
-        await Swal.fire({ title: 'افزایش سهمیه انجام شد', text: `تعداد ${result.new_slots} سهمیه جدید اضافه شد.`, icon: 'success', confirmButtonColor: '#10b981' });
+
+        await supabaseClient.from('pools').update({
+            member_capacity: (pool.member_capacity || 0) + newSlots
+        }).eq('id', poolId);
+
+        await supabaseClient.from('sub_requests').update({ status: 'approved' }).eq('id', requestId);
+
+        await Swal.fire({
+            title: 'افزایش سهمیه انجام شد',
+            text: `تعداد ${newSlots} سهمیه جدید به صندوق اضافه شد. ✅`,
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2.5rem] glass-card' }
+        });
+
         location.reload();
-    } catch (e) { alert('خطا در سهمیه: ' + e.message); }
+    } catch (e) { alert("خطا در سهمیه"); }
 };
 
 async function loadBillingHistory() {
@@ -531,17 +569,9 @@ window.deletePool = async function(poolId, poolName) {
                 didOpen: () => { Swal.showLoading(); }
             });
 
-            const { value: pw } = await Swal.fire({
-                title: 'تایید نهایی', input: 'password', text: 'برای حذف کامل، رمز اصلی COMMAND CENTER را وارد کنید.',
-                confirmButtonText: 'ادامه حذف', confirmButtonColor: '#ef4444',
-                showCancelButton: true, cancelButtonText: 'انصراف'
-            });
-            if (!pw) { Swal.close(); return; }
-
-            // حذف کامل فقط از مسیر RPC محافظت‌شده انجام می‌شود.
+            // دستور حذف کامل (شامل اکانت‌های Supabase Auth) از طریق RPC
             const { data: success, error } = await supabaseClient.rpc('delete_pool_complete', {
-                pool_id_param: poolId,
-                admin_password: pw
+                pool_id_param: poolId
             });
 
             if (error) throw error;
