@@ -2,7 +2,7 @@
  * نسخه نهایی و تضمینی ستاد فرماندهی (Super Admin)
  ************************************************/
 var SUPABASE_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
-var SUPABASE_KEY = 'sb_publishable_ZqXeccdaSzZUivCwU38WcQ_m05uT4y6';
+var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxbnNibnB6bmt3a3d1a3pva2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDc4NjgsImV4cCI6MjA4MjEyMzg2OH0.dsqyFP37JyrfYDVwasNZW_Aid9ah0e6SxdnS8j8xV5s';
 var supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 var allPoolsCache = [];
@@ -14,7 +14,7 @@ window.alert = function(msg) {
         icon: 'info',
         confirmButtonText: 'متوجه شدم',
         confirmButtonColor: '#fbbf24',
-        customClass: { popup: 'rounded-[2.5rem] glass-card' }
+        customClass: { popup: 'rounded-را[2.5rem] glass-card' }
     });
 };
 
@@ -23,78 +23,73 @@ window.alert = function(msg) {
  * موتور شروع به کار ستاد فرماندهی (INIT)
  ************************************************/
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('🔍 Checking authenticated Super Admin access...');
+    console.log('🔐 Checking dedicated Super Admin authentication...');
 
     try {
         const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
-        if (authError) throw authError;
-        if (!user) return redirectUnauthorized();
-
-        const { data: member, error: memberError } = await supabaseClient
-            .from('members')
-            .select('id, full_name, is_super_admin, is_admin, status')
-            .eq('id', user.id)
-            .maybeSingle();
-
-        if (memberError) throw memberError;
-        if (!member?.is_super_admin || member.status === 'blocked') {
-            return redirectUnauthorized();
+        const stepUp = sessionStorage.getItem('super_admin_2fa') === 'true';
+        if (authError || !user || !stepUp) {
+            window.location.replace('super-admin-login.html');
+            return;
         }
 
-        const userName = member.full_name || user.email || 'E.BANK OWNER';
-        const userNameEl = document.getElementById('user-name-display');
-        if (userNameEl) userNameEl.textContent = userName;
+        const { data: profile, error: profileError } = await supabaseClient
+            .from('members')
+            .select('id, full_name, is_admin, is_super_admin, status')
+            .eq('id', user.id)
+            .single();
 
-        await Promise.all([loadMasterStats(), loadBillingHistory(), loadMasterCard()]);
-        console.log('✅ Super Admin center loaded.');
+        if (profileError || !profile || profile.is_super_admin !== true || profile.status === 'blocked') {
+            await supabaseClient.auth.signOut();
+            window.location.replace('super-admin-login.html');
+            return;
+        }
+
+        console.log('✅ Super Admin identity verified:', user.id);
+        const nameEl = document.getElementById('user-name-display');
+        if (nameEl) nameEl.textContent = profile.full_name || user.email || 'E.BANK OWNER';
+
+        await loadMasterStats();
+        await loadBillingHistory();
+        await loadMasterCard();
+
     } catch (err) {
-        console.error('❌ Error loading center:', err);
-        await Swal.fire({ title: 'خطا در بارگذاری', text: err.message || 'خطای نامشخص', icon: 'error' });
-        redirectUnauthorized(false);
-    }
-});
-
-supabaseClient.auth.onAuthStateChange((_event, session) => {
-    if (!session) redirectUnauthorized(false);
-});
-
-async function redirectUnauthorized(showMessage = true) {
-    if (showMessage) {
+        console.error('❌ Super Admin initialization failed:', err);
         await Swal.fire({
-            title: 'دسترسی غیرمجاز',
-            text: 'برای ورود به COMMAND CENTER باید حساب سوپر ادمین داشته باشید.',
+            title: 'خطا در احراز هویت',
+            text: 'نشست مدیریت ارشد معتبر نیست. لطفاً دوباره وارد شوید.',
             icon: 'error',
-            timer: 2200,
-            showConfirmButton: false
+            confirmButtonColor: '#fbbf24'
         });
+        window.location.replace('super-admin-login.html');
     }
-    window.location.replace('index.html');
-}
+});
 
-function getNumber(value, fallback = 0) {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-}
+// Logout is explicit and destroys the Supabase Auth session.
+window.superAdminLogout = async function () {
+    await supabaseClient.auth.signOut();
+    sessionStorage.clear();
+    window.location.replace('super-admin-login.html');
+};
 
-function showError(message, title = 'خطا') {
-    return Swal.fire({ title, text: message, icon: 'error', confirmButtonColor: '#ef4444' });
-}
-
+supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || !session) {
+        window.location.replace('super-admin-login.html');
+    }
+});
 // --- توابع هسته مرکزی ---
 
 async function loadMasterStats() {
-    const [{ data: pools, error: poolsError }, { count: userCount, error: usersError }] = await Promise.all([
-        supabaseClient.from('pools').select('id,pool_name,pool_code,is_active,sub_expiry,sub_price,share_price').order('created_at', { ascending: false }),
-        supabaseClient.from('members').select('id', { count: 'exact', head: true })
-    ]);
+    try {
+        const { data: pools } = await supabaseClient.from('pools').select('*').order('created_at', { ascending: false });
+        const { count: userCount } = await supabaseClient.from('members').select('*', { count: 'exact', head: true });
 
-    if (poolsError) throw poolsError;
-    if (usersError) throw usersError;
+        document.getElementById('total-pools').innerText = pools ? pools.length : 0;
+        document.getElementById('total-users').innerText = userCount || 0;
 
-    document.getElementById('total-pools').innerText = pools?.length || 0;
-    document.getElementById('total-users').innerText = userCount || 0;
-    allPoolsCache = pools || [];
-    renderPoolsList();
+        allPoolsCache = pools || [];
+        renderPoolsList();
+    } catch (e) { console.error(e); }
 }
 
 function escapeHtml(str) {
@@ -135,11 +130,11 @@ function renderPoolsList() {
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="text-[7px] text-slate-500 block mb-1">هزینه تمدید:</label>
-                            <input type="number" id="price-${pool.id}" value="${getNumber(pool.sub_price, 100000)}" class="w-full bg-transparent text-[10px] font-black text-yellow-500 outline-none">
+                            <input type="number" id="price-${pool.id}" value="${pool.sub_price || 100000}" class="w-full bg-transparent text-[10px] font-black text-yellow-500 outline-none">
                         </div>
                         <div>
                             <label class="text-[7px] text-slate-500 block mb-1">قیمت سهمیه:</label>
-                            <input type="number" id="share-price-${pool.id}" value="${getNumber(pool.share_price, 10000)}" class="w-full bg-transparent text-[10px] font-black text-emerald-400 outline-none">
+                            <input type="number" id="share-price-${pool.id}" value="${pool.share_price || 10000}" class="w-full bg-transparent text-[10px] font-black text-emerald-400 outline-none">
                         </div>
                     </div>
                 </div>
@@ -222,12 +217,11 @@ window.viewSubRequests = async function(poolId, poolName) {
         }
 
         // ۲. دریافت تنظیمات قیمتی مخصوص این صندوق برای محاسبه تناسب
-        const { data: poolInfo, error: poolErr } = await supabaseClient
+        const { data: poolInfo } = await supabaseClient
             .from('pools')
             .select('sub_price, sub_duration_days, share_price')
             .eq('id', poolId)
             .single();
-        if (poolErr) throw poolErr;
 
         // ۳. ساخت محتوای مودال به صورت لیست
         let listHtml = `
@@ -236,31 +230,28 @@ window.viewSubRequests = async function(poolId, poolName) {
         `;
 
         requests.forEach(req => {
-            const reqAmount = getNumber(req.amount);
-            const receiptUrl = typeof req.receipt_url === 'string' && /^(https?:\/\/|\/)/i.test(req.receipt_url) ? req.receipt_url : '#';
-            const safeReceiptUrl = escapeHtml(receiptUrl);
             // محاسبات هوشمند لحظه‌ای برای نمایش به شما 👇
-            const calcDays = Math.floor((reqAmount / (poolInfo.sub_price || 100000)) * (poolInfo.sub_duration_days || 30));
-            const calcSlots = Math.floor(reqAmount / (poolInfo.share_price || 10000));
+            const calcDays = Math.floor((req.amount / (poolInfo.sub_price || 100000)) * (poolInfo.sub_duration_days || 30));
+            const calcSlots = Math.floor(req.amount / (poolInfo.share_price || 10000));
 
             listHtml += `
                 <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:25px; border:1px solid rgba(255,255,255,0.1); margin-bottom:15px; box-shadow:0 10px 20px rgba(0,0,0,0.2);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                        <span style="color:#fbbf24; font-[900]; font-size:16px;">${reqAmount.toLocaleString('fa-IR')} <small style="font-size:9px; font-weight:normal;">تومان</small></span>
-                        <a href="${safeReceiptUrl}" target="_blank" style="background:#4f46e5; color:white; padding:8px 15px; border-radius:12px; font-size:10px; font-weight:black; text-decoration:none;">
+                        <span style="color:#fbbf24; font-[900]; font-size:16px;">${Number(req.amount).toLocaleString()} <small style="font-size:9px; font-weight:normal;">تومان</small></span>
+                        <a href="${req.receipt_url}" target="_blank" style="background:#4f46e5; color:white; padding:8px 15px; border-radius:12px; font-size:10px; font-weight:black; text-decoration:none;">
                             <i class="fas fa-eye ml-1"></i> مشاهده فیش
                         </a>
                     </div>
                     
                     <div style="display:grid; grid-cols:1; gap:8px;">
                         <!-- دکمه تایید اشتراک با نمایش روز محاسبه شده -->
-                        <button onclick="Swal.close(); approveSubscription(${Number(req.id)}, ${Number(poolId)}, ${reqAmount})" 
+                        <button onclick="Swal.close(); approveSubscription(${req.id}, ${poolId}, ${req.amount})" 
                                 style="width:100%; background:#10b981; color:white; border:none; padding:12px; border-radius:15px; font-[900]; font-size:11px; cursor:pointer;">
                             تایید بعنوان اشتراک (${calcDays} روز اعتبار)
                         </button>
                         
                         <!-- دکمه تایید سهمیه با نمایش تعداد محاسبه شده -->
-                        <button onclick="Swal.close(); approveMemberQuota(${Number(req.id)}, ${Number(poolId)}, ${reqAmount})" 
+                        <button onclick="Swal.close(); approveMemberQuota(${req.id}, ${poolId}, ${req.amount})" 
                                 style="width:100%; background:#3b82f6; color:white; border:none; padding:12px; border-radius:15px; font-[900]; font-size:11px; cursor:pointer;">
                             تایید بعنوان سهمیه (${calcSlots} نفر ظرفیت)
                         </button>
@@ -274,7 +265,7 @@ window.viewSubRequests = async function(poolId, poolName) {
 
         // ۴. نمایش نهایی با SweetAlert2
         Swal.fire({
-            title: `<span style="color:#fff; font-size:18px;">بررسی مالی: ${escapeHtml(poolName)}</span>`,
+            title: `<span style="color:#fff; font-size:18px;">بررسی مالی: ${poolName}</span>`,
             html: listHtml,
             showConfirmButton: false,
             showCloseButton: true,
@@ -294,129 +285,86 @@ window.viewSubRequests = async function(poolId, poolName) {
  * تایید هوشمند اشتراک (محاسبه دقیق بر اساس مبلغ)
  ************************************************/
 window.approveSubscription = async function(requestId, poolId, paidAmount) {
-    if (!Number.isFinite(Number(paidAmount)) || Number(paidAmount) <= 0) {
-        return showError('مبلغ واریزی معتبر نیست.');
-    }
-
     const { value: pw } = await Swal.fire({
-        title: 'تأیید هویت',
-        input: 'password',
-        inputAttributes: { autocomplete: 'current-password' },
-        text: 'رمز اصلی COMMAND CENTER را وارد کنید',
-        showCancelButton: true,
-        cancelButtonText: 'انصراف',
-        confirmButtonColor: '#fbbf24',
-        customClass: { popup: 'rounded-[2.5rem] glass-card' }
+        title: 'تایید هویت', input: 'password', text: 'رمز اصلی (COMMAND CENTER) رو وارد کن',
+        confirmButtonColor: '#fbbf24', customClass: { popup: 'rounded-[2.5rem] glass-card' }
     });
     if (!pw) return;
 
-    Swal.fire({ title: 'در حال ثبت...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
-        const { data, error } = await supabaseClient.rpc('super_admin_approve_subscription', {
+        const { data: result, error } = await supabaseClient.rpc('super_admin_approve_subscription', {
             admin_password: pw,
-            request_id_param: Number(requestId),
-            pool_id_param: Number(poolId),
-            paid_amount: Math.trunc(Number(paidAmount))
+            request_id_param: requestId,
+            pool_id_param: poolId,
+            paid_amount: Number(paidAmount)
         });
         if (error) throw error;
-        if (!data?.ok) throw new Error(data?.reason === 'bad_password' ? 'رمز اصلی اشتباه است.' : (data?.reason || 'عملیات تأیید انجام نشد.'));
-
-        await Swal.fire({
-            title: 'تمدید با موفقیت ثبت شد',
-            text: `${data.days_granted || data.days_to_grant || 0} روز به اعتبار صندوق اضافه شد.`,
-            icon: 'success',
-            confirmButtonColor: '#10b981',
-            customClass: { popup: 'rounded-[2.5rem] glass-card' }
-        });
-        await Promise.all([loadMasterStats(), loadBillingHistory()]);
-    } catch (e) {
-        await showError('خطا در تمدید: ' + (e.message || 'خطای نامشخص'));
-    }
+        if (!result?.ok) {
+            const msg = result?.reason === 'insufficient_amount' ? 'مبلغ برای حداقل یک روز کافی نیست.' : 'رمز اصلی اشتباه است.';
+            throw new Error(msg);
+        }
+        await Swal.fire({ title: 'تمدید هوشمند انجام شد', text: `اعتبار صندوق به اندازه ${result.days_granted} روز افزایش یافت.`, icon: 'success', confirmButtonColor: '#10b981' });
+        location.reload();
+    } catch (e) { alert('خطا در تمدید: ' + e.message); }
 };
 
+/************************************************
+ * تایید هوشمند سهمیه (محاسبه بر اساس قیمت واحد)
+ ************************************************/
 window.approveMemberQuota = async function(requestId, poolId, paidAmount) {
-    if (!Number.isFinite(Number(paidAmount)) || Number(paidAmount) <= 0) {
-        return showError('مبلغ واریزی معتبر نیست.');
-    }
-
     const { value: pw } = await Swal.fire({
-        title: 'تأیید هویت',
-        input: 'password',
-        inputAttributes: { autocomplete: 'current-password' },
-        text: 'رمز اصلی COMMAND CENTER را وارد کنید',
-        showCancelButton: true,
-        cancelButtonText: 'انصراف',
-        confirmButtonColor: '#fbbf24',
-        customClass: { popup: 'rounded-[2.5rem] glass-card' }
+        title: 'تایید هویت', input: 'password', text: 'رمز اصلی (COMMAND CENTER) رو وارد کن',
+        confirmButtonColor: '#fbbf24', customClass: { popup: 'rounded-[2.5rem] glass-card' }
     });
     if (!pw) return;
 
-    Swal.fire({ title: 'در حال ثبت...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     try {
-        const { data, error } = await supabaseClient.rpc('super_admin_approve_quota', {
+        const { data: result, error } = await supabaseClient.rpc('super_admin_approve_quota', {
             admin_password: pw,
-            request_id_param: Number(requestId),
-            pool_id_param: Number(poolId),
-            paid_amount: Math.trunc(Number(paidAmount))
+            request_id_param: requestId,
+            pool_id_param: poolId,
+            paid_amount: Number(paidAmount)
         });
         if (error) throw error;
-        if (!data?.ok) throw new Error(data?.reason === 'bad_password' ? 'رمز اصلی اشتباه است.' : (data?.reason || 'عملیات تأیید انجام نشد.'));
-
-        await Swal.fire({
-            title: 'افزایش سهمیه ثبت شد',
-            text: `${data.new_slots || 0} سهمیه جدید اضافه شد.`,
-            icon: 'success',
-            confirmButtonColor: '#10b981',
-            customClass: { popup: 'rounded-[2.5rem] glass-card' }
-        });
-        await Promise.all([loadMasterStats(), loadBillingHistory()]);
-    } catch (e) {
-        await showError('خطا در سهمیه: ' + (e.message || 'خطای نامشخص'));
-    }
+        if (!result?.ok) {
+            const msg = result?.reason === 'insufficient_amount' ? 'مبلغ برای خرید یک سهمیه کافی نیست.' : 'رمز اصلی اشتباه است.';
+            throw new Error(msg);
+        }
+        await Swal.fire({ title: 'افزایش سهمیه انجام شد', text: `تعداد ${result.new_slots} سهمیه جدید اضافه شد.`, icon: 'success', confirmButtonColor: '#10b981' });
+        location.reload();
+    } catch (e) { alert('خطا در سهمیه: ' + e.message); }
 };
 
 async function loadBillingHistory() {
-    const { data, error } = await supabaseClient
-        .from('sub_requests')
-        .select('amount,status,created_at,pool_id,pools(pool_name)')
-        .order('created_at', { ascending: false });
-    if (error) throw error;
+    try {
+        const { data } = await supabaseClient.from('sub_requests').select('amount, status, created_at, pools(pool_name)').order('created_at', { ascending: false });
+        
+        const totalRevenue = data?.filter(req => req.status === 'approved').reduce((sum, current) => sum + Number(current.amount), 0) || 0;
+        const revEl = document.getElementById('total-revenue-amt');
+        if (revEl) revEl.innerHTML = `${totalRevenue.toLocaleString()} <span class="text-sm font-normal text-slate-500">تومان</span>`;
 
-    const totalRevenue = (data || [])
-        .filter(req => req.status === 'approved')
-        .reduce((sum, current) => sum + getNumber(current.amount), 0);
+        const container = document.getElementById('billing-container');
+        if (!container || !data) return;
 
-    const revEl = document.getElementById('total-revenue-amt');
-    if (revEl) {
-        revEl.innerHTML = `${totalRevenue.toLocaleString('fa-IR')} <span class="text-sm font-normal text-slate-500">تومان</span>`;
-    }
-
-    const container = document.getElementById('billing-container');
-    if (!container) return;
-
-    container.innerHTML = (data || []).map(req => {
-        const poolName = escapeHtml(req.pools?.pool_name || 'نامشخص');
-        const statusText = req.status === 'approved' ? 'تایید نهایی' : escapeHtml(req.status || 'در انتظار');
-        const amount = getNumber(req.amount).toLocaleString('fa-IR');
-        const date = req.created_at ? new Date(req.created_at).toLocaleDateString('fa-IR') : '---';
-        return `
+        container.innerHTML = data.map(req => `
             <div class="glass-card p-5 rounded-[2rem] flex justify-between items-center border-white/5 mb-3">
                 <div class="text-right">
-                    <p class="text-[10px] font-black text-white">${poolName}</p>
-                    <p class="text-[8px] text-slate-500 mt-1">${date}</p>
+                    <p class="text-[10px] font-black text-white">${req.pools ? req.pools.pool_name : 'نامشخص'}</p>
+                    <p class="text-[8px] text-slate-500 mt-1">${new Date(req.created_at).toLocaleDateString('fa-IR')}</p>
                 </div>
                 <div class="text-left">
-                    <p class="text-xs font-black text-emerald-400">${amount} ت</p>
-                    <span class="text-[7px] font-bold px-2 py-0.5 rounded-full ${req.status === 'approved' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-orange-500/10 text-orange-500'}">${statusText}</span>
+                    <p class="text-xs font-black text-emerald-400">${Number(req.amount).toLocaleString()} ت</p>
+                    <span class="text-[7px] font-bold px-2 py-0.5 rounded-full ${req.status === 'approved' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-orange-500/10 text-orange-500'}">
+                        ${req.status === 'approved' ? 'تایید نهایی' : 'در انتظار'}
+                    </span>
                 </div>
-            </div>`;
-    }).join('');
+            </div>`).join('');
+    } catch (e) { console.error(e); }
 }
 
 window.exportBillingToExcel = async function() {
     try {
-        const { data, error } = await supabaseClient.from('sub_requests').select('amount,status,created_at,pools(pool_name)');
-        if (error) throw error;
+        const { data } = await supabaseClient.from('sub_requests').select('amount, status, created_at, pools(pool_name)');
         const excelData = data.map(r => ({
             "نام صندوق": r.pools ? r.pools.pool_name : "نامشخص",
             "مبلغ (تومان)": Number(r.amount),
@@ -479,10 +427,12 @@ async function loadMasterCard() {
 }
 
 // ۲. ذخیره اطلاعات کارت جدید
-window.saveMasterCard = async function(btn) {
+window.saveMasterCard = async function() {
     const newCard = document.getElementById('master-card-input').value.trim();
     const newName = document.getElementById('master-card-name-input').value.trim();
-    if (!/^\d{16}$/.test(newCard) || !newName) {
+    const btn = event.currentTarget;
+
+    if (newCard.length < 16 || !newName) {
         return Swal.fire({ text: "شماره کارت ۱۶ رقمی و نام صاحب حساب الزامی است", icon: 'warning', confirmButtonColor: '#fbbf24' });
     }
 
@@ -581,20 +531,16 @@ window.deletePool = async function(poolId, poolName) {
                 didOpen: () => { Swal.showLoading(); }
             });
 
-            // دستور حذف کامل (شامل اکانت‌های Supabase Auth) از طریق RPC
             const { value: pw } = await Swal.fire({
-                title: 'رمز اصلی برای حذف',
-                input: 'password',
-                inputAttributes: { autocomplete: 'current-password' },
-                text: 'برای حذف نهایی رمز اصلی COMMAND CENTER را وارد کنید.',
-                showCancelButton: true,
-                cancelButtonText: 'انصراف',
-                confirmButtonColor: '#ef4444'
+                title: 'تایید نهایی', input: 'password', text: 'برای حذف کامل، رمز اصلی COMMAND CENTER را وارد کنید.',
+                confirmButtonText: 'ادامه حذف', confirmButtonColor: '#ef4444',
+                showCancelButton: true, cancelButtonText: 'انصراف'
             });
-            if (!pw) return;
+            if (!pw) { Swal.close(); return; }
 
+            // حذف کامل فقط از مسیر RPC محافظت‌شده انجام می‌شود.
             const { data: success, error } = await supabaseClient.rpc('delete_pool_complete', {
-                pool_id_param: Number(poolId),
+                pool_id_param: poolId,
                 admin_password: pw
             });
 
@@ -628,6 +574,57 @@ window.deletePool = async function(poolId, poolName) {
 /************************************************
  * تابع تغییر رمز عبور ستاد فرماندهی (نسخه امنیتی)
  ************************************************/
+window.handleChangeMasterPassword = async function() {
+    const { value: formValues } = await Swal.fire({
+        title: '<span style="color:#fff; font-size:18px;">تغییر کلید دسترسی ستاد</span>',
+        html: `
+            <div style="padding: 10px; overflow-x: hidden;">
+                <input id="swal-input1" class="swal2-input" type="password" placeholder="رمز عبور فعلی" 
+                    style="width: 100%; margin: 10px 0; box-sizing: border-box; text-align: center; border-radius: 15px; background: #0f172a; border: 1px solid #334155; color: #fbbf24;">
+                <input id="swal-input2" class="swal2-input" type="password" placeholder="رمز عبور جدید" 
+                    style="width: 100%; margin: 10px 0; box-sizing: border-box; text-align: center; border-radius: 15px; background: #0f172a; border: 1px solid #334155; color: #fff;">
+            </div>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'بروزرسانی رمز',
+        cancelButtonText: 'انصراف',
+        confirmButtonColor: '#ef4444',
+        background: '#1e293b',
+        customClass: { popup: 'rounded-[2.5rem] border border-white/10 shadow-2xl' },
+        preConfirm: () => {
+            const p1 = document.getElementById('swal-input1').value;
+            const p2 = document.getElementById('swal-input2').value;
+            if (!p1 || !p2) {
+                Swal.showValidationMessage('لطفاً هر دو کادر را پر کنید');
+                return false;
+            }
+            return [p1, p2];
+        }
+    });
+
+    if (formValues) {
+        const [oldPass, newPass] = formValues;
+        if (newPass.length < 8) return Swal.fire({ text: "رمز جدید باید حداقل ۸ کاراکتر باشد", icon: 'error' });
+
+        Swal.fire({ title: 'در حال ایمن‌سازی...', didOpen: () => Swal.showLoading() });
+
+        try {
+            const { data: success, error } = await supabaseClient.rpc('update_master_password', {
+                current_pass: oldPass,
+                new_pass: newPass
+            });
+            if (error) throw error;
+
+            if (success) {
+                await Swal.fire({ title: 'موفقیت‌آمیز', text: 'رمز عبور ستاد با موفقیت تغییر یافت ✅', icon: 'success', confirmButtonColor: '#10b981', customClass: { popup: 'rounded-[2rem]' } });
+            } else {
+                await Swal.fire({ title: 'خطا', text: 'رمز فعلی اشتباه است! ❌', icon: 'error', confirmButtonColor: '#ef4444', customClass: { popup: 'rounded-[2rem]' } });
+            }
+        } catch (e) { alert("خطای سیستمی: " + e.message); }
+    }
+};
+
 /************************************************
  * تابع مدیریت باز و بسته شدن کرکره‌ها (Accordion)
  ************************************************/
@@ -676,22 +673,16 @@ window.handleChangeMasterPassword = async function() {
             confirmButton: 'rounded-2xl py-3 px-6 font-black text-slate-900',
             cancelButton: 'rounded-2xl py-3 px-6'
         },
-        preConfirm: () => {
-            const oldPass = document.getElementById('old-p').value;
-            const newPass = document.getElementById('new-p').value;
-            if (!oldPass || newPass.length < 8) { Swal.showValidationMessage('رمز جدید باید حداقل ۸ کاراکتر باشد'); return false; }
-            return [oldPass, newPass];
-        }
+        preConfirm: () => [document.getElementById('old-p').value, document.getElementById('new-p').value]
     });
 
     if (formValues && formValues[0] && formValues[1]) {
         Swal.fire({ title: 'در حال ایمن‌سازی...', didOpen: () => Swal.showLoading() });
-        const { data: isOk, error } = await supabaseClient.rpc('update_master_password', {
+        const { data: isOk } = await supabaseClient.rpc('update_master_password', {
             current_pass: formValues[0],
             new_pass: formValues[1]
         });
 
-        if (error) throw error;
         if (isOk) {
             Swal.fire({ title: 'انجام شد ✅', text: 'رمز عبور با موفقیت تغییر کرد.', icon: 'success', confirmButtonColor: '#10b981', customClass: { popup: 'rounded-[2rem]' } });
         } else {
@@ -725,22 +716,16 @@ window.handleChangeSecretNumber = async function() {
             confirmButton: 'rounded-2xl py-3 px-6 font-black text-slate-900',
             cancelButton: 'rounded-2xl py-3 px-6'
         },
-        preConfirm: () => {
-            const auth = document.getElementById('p-auth').value;
-            const otp = document.getElementById('new-otp').value;
-            if (!auth || !/^\d{4,5}$/.test(otp)) { Swal.showValidationMessage('رمز و عدد مخفی ۴ یا ۵ رقمی الزامی است'); return false; }
-            return [auth, otp];
-        }
+        preConfirm: () => [document.getElementById('p-auth').value, document.getElementById('new-otp').value]
     });
 
     if (formValues && formValues[0] && formValues[1]) {
         Swal.fire({ title: 'در حال ثبت...', didOpen: () => Swal.showLoading() });
-        const { data: isOk, error } = await supabaseClient.rpc('update_master_otp_secret', {
+        const { data: isOk } = await supabaseClient.rpc('update_master_otp_secret', {
             current_pass: formValues[0],
             new_secret_num: parseInt(formValues[1])
         });
 
-        if (error) throw error;
         if (isOk) {
             Swal.fire({ title: 'تغییر یافت ✅', text: 'عدد مخفی فرمول بروزرسانی شد.', icon: 'success', confirmButtonColor: '#10b981', customClass: { popup: 'rounded-[2rem]' } });
         } else {
@@ -756,7 +741,7 @@ window.handleChangeSecretNumber = async function() {
 /************************************************
  * تابع ذخیره عدد ثابت ماشه (تعداد کلیک‌ها)
  ************************************************/
-window.saveClickConstant = async function(btn) {
+window.saveClickConstant = async function() {
     const clickInput = document.getElementById('click-constant-input');
     if (!clickInput) return;
 
@@ -783,8 +768,10 @@ window.saveClickConstant = async function(btn) {
     if (!pw) return;
 
     // تغییر وضعیت دکمه
-    const originalText = btn ? btn.innerText : 'ذخیره';
-    if (btn) { btn.disabled = true; btn.innerText = "در حال ثبت..."; }
+    const btn = event.currentTarget;
+    const originalText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = "در حال ثبت...";
 
     try {
         // ۲. آپدیت از طریق RPC امن (نه نوشتن مستقیم روی جدول)
@@ -811,6 +798,7 @@ window.saveClickConstant = async function(btn) {
         console.error(e);
         Swal.fire({ text: "خطا در ذخیره‌سازی: " + e.message, icon: 'error' });
     } finally {
-        if (btn) { btn.disabled = false; btn.innerText = originalText; }
+        btn.disabled = false;
+        btn.innerText = originalText;
     }
 };
