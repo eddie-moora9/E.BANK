@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/sa-portal", "destination": "/super-admin-login.html" }
+  ]
+}
