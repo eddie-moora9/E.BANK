@@ -1,4 +1,9 @@
 {
+  "redirects": [
+    { "source": "/sa-portal", "has": [{ "type": "host", "value": "e-bank-eta.vercel.app" }], "destination": "https://e-bank-sa.vercel.app/sa-portal", "permanent": false },
+    { "source": "/super-admin-login.html", "has": [{ "type": "host", "value": "e-bank-eta.vercel.app" }], "destination": "https://e-bank-sa.vercel.app/sa-portal", "permanent": false },
+    { "source": "/super_admin.html", "has": [{ "type": "host", "value": "e-bank-eta.vercel.app" }], "destination": "https://e-bank-sa.vercel.app/sa-portal", "permanent": false }
+  ],
   "rewrites": [
     { "source": "/sa-portal", "destination": "/super-admin-login.html" }
   ]
