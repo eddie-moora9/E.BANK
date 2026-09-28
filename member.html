@@ -24,7 +24,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
     
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700;800;900&display=swap');
@@ -674,9 +673,14 @@ body:has(#home-sec:not(.hidden)) > header .absolute.-top-1.-left-1{
 </style>
 
   
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#064e3b">
-    <link rel="apple-touch-icon" href="icon.png">
+    <link rel="manifest" href="/app-manifest.json">
+<meta name="theme-color" content="#10b981">
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="E.BANK">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
 <style id="ebank-home-ui-final-tuning">
 /* =========================================================
@@ -1473,5 +1477,13 @@ body:has(#home-sec:not(.hidden)) > header .absolute.-top-1.-left-1{
     <!-- اسکریپت جابجایی صفحات (منطق واقعی داخل app.js تعریف شده) -->
 
     <script src="app.js"></script>
+    
+    <script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/app-sw.js').catch(() => {});
+    });
+  }
+</script>
 </body>
 </html>

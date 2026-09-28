@@ -383,22 +383,6 @@ window.voteOnLoan = async function(loanId, type) {
 /************************************************
  * ۶. نوتیفیکیشن، تماس و امنیت
  ************************************************/
-async function notifyManager(title, message, poolId) {
-    const APP_ID = "6235857d-565c-4223-bffa-af420f2cd45b"; 
-    const API_KEY = "os_v2_app_mi2yk7kwlrbchp72v5ba6lgulm3yudga3sbeet5dt2feqhyer27faufsiea2acnuio5vcmebonhdyyw5vqqo6zfqc3i3gnyw6";
-    try {
-        await fetch("https://onesignal.com/api/v1/notifications", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": "Basic " + API_KEY },
-            body: JSON.stringify({
-                app_id: APP_ID,
-                filters: [{ "field": "tag", "key": "role", "relation": "=", "value": "admin" }, { "operator": "AND" }, { "field": "tag", "key": "pool_id", "relation": "=", "value": String(poolId) }],
-                headings: { "fa": title }, contents: { "fa": message }
-            })
-        });
-    } catch (e) { console.error(e); }
-}
-
 async function loadLastWinner(poolId) {
     const { data } = await supabaseClient.from('lottery_results').select('winner_name').eq('pool_id', poolId).order('draw_date', { ascending: false }).limit(1);
     if (data && data[0]) document.getElementById('lucky-winner').innerText = data[0].winner_name;

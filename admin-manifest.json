@@ -1,0 +1,29 @@
+{
+  "id": "/admin.html",
+  "name": "E.BANK Admin",
+  "short_name": "E.BANK Admin",
+  "description": "پنل مدیریت E.BANK",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "/admin.html",
+  "scope": "/admin.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>E.BANK | پنل مدیریت ارشد</title>
+  <link rel="manifest" href="/admin-manifest.json">
+<meta name="theme-color" content="#4f46e5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="E.BANK Admin">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
     
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -26,7 +37,6 @@
         .chat-delete-btn { position:absolute; top:-8px; left:-8px; width:20px;height:20px;background:#f43f5e;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px; }
     
     
-        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700;800;900&display=swap');
         body { font-family: 'Vazirmatn', sans-serif; background-color: #f8fafc; margin: 0; overflow-x: hidden; }
         .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.5); }
         .nav-btn { color: #94a3b8; transition: all 0.3s; }
@@ -1824,7 +1834,6 @@
     </div>
 </div>
 
-    <script src="admin_app.js"></script>
     <!-- گزارش قابل چاپ/PDF تراکنش‌ها (توسط JS پر میشه) -->
     <div id="print-report">
         <div class="watermark">E.BANK</div>
@@ -1881,6 +1890,17 @@
         </button>
     </div>
 </div>
+
+<script src="admin_app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/admin-sw.js', { scope: '/admin.html' })
+        .catch((e) => console.error('E.BANK Admin SW failed:', e));
+    });
+  }
+</script>
 
 </body>
 </html>
