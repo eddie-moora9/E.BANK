@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>E.BANK | SUPER ADMIN LOGIN</title>
+  <link rel="manifest" href="/sa-manifest.json">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" type="image/png" href="/sa-icon-192.png">
+  <link rel="apple-touch-icon" href="/sa-icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="SA E.BANK">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -42,5 +50,6 @@ const client=supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSessi
 (async()=>{try{await client.auth.signOut()}catch(_){}})();
 document.getElementById('login-form').addEventListener('submit',async(e)=>{e.preventDefault();const btn=document.getElementById('login-btn');const email=document.getElementById('email').value.trim();const authPassword=document.getElementById('auth-password').value;const masterPassword=document.getElementById('master-password').value;const otp=document.getElementById('otp').value.trim();btn.disabled=true;btn.textContent='در حال احراز هویت...';try{const {data,error}=await client.auth.signInWithPassword({email,password:authPassword});if(error||!data.user)throw new Error('ایمیل یا رمز حساب صحیح نیست.');const {data:profile,error:profileError}=await client.from('members').select('id,full_name,is_super_admin,status').eq('id',data.user.id).single();if(profileError||!profile||profile.is_super_admin!==true||profile.status==='blocked'){await client.auth.signOut();throw new Error('این حساب مجوز Super Admin ندارد.')}const {data:masterOk,error:masterError}=await client.rpc('verify_master_access',{input_password:masterPassword});if(masterError||masterOk!==true){await client.auth.signOut();throw new Error('کلید اصلی اشتباه است.')}const {data:otpOk,error:otpError}=await client.rpc('verify_2fa_access',{user_provided_code:otp});if(otpError||otpOk!==true){await client.auth.signOut();throw new Error('کد امنیتی مرحله دوم صحیح نیست.')}sessionStorage.setItem('super_admin_2fa','true');sessionStorage.setItem('user_name',profile.full_name||'E.BANK OWNER');window.location.replace('super_admin.html')}catch(err){await Swal.fire({title:'ورود ناموفق',text:err.message||'خطای ناشناخته',icon:'error',confirmButtonColor:'#4f46e5'})}finally{btn.disabled=false;btn.textContent='ورود امن به Command Center'}});
 </script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sa-sw.js').catch(function(){});});}</script>
 </body>
 </html>

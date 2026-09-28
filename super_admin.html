@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>E.BANK | SUPER ADMIN</title>
+  <link rel="manifest" href="/sa-manifest.json">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" type="image/png" href="/sa-icon-192.png">
+  <link rel="apple-touch-icon" href="/sa-icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="SA E.BANK">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
@@ -122,5 +130,6 @@
     <section id="page-view" class="page-view"></section>
   </main>
   <script src="super_admin_app.js"></script>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sa-sw.js').catch(function(){});});}</script>
 </body>
 </html>
