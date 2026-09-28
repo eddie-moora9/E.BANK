@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "E.BANK",
+  "short_name": "E.BANK",
+  "description": "سیستم مدیریت هوشمند صندوق و سرمایه‌گذاری",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
