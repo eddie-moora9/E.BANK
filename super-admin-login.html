@@ -4,93 +4,43 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <title>E.BANK | SUPER ADMIN</title>
+  <title>E.BANK | SUPER ADMIN LOGIN</title>
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
-    *{box-sizing:border-box} body{margin:0;min-height:100vh;font-family:Vazirmatn,sans-serif;background:#020617;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:20px}
-    .card{width:min(440px,100%);background:rgba(15,23,42,.86);border:1px solid rgba(251,191,36,.22);border-radius:34px;padding:28px;box-shadow:0 30px 90px rgba(0,0,0,.55);backdrop-filter:blur(20px)}
-    .input{width:100%;background:#020617;border:1px solid #334155;color:#fff;border-radius:18px;padding:14px 16px;outline:none;transition:.2s}.input:focus{border-color:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.1)}
-    .btn{width:100%;border:0;border-radius:18px;padding:14px;font-weight:900;cursor:pointer;background:#fbbf24;color:#020617}.btn:disabled{opacity:.6;cursor:wait}
-    .badge{display:inline-flex;padding:6px 12px;border-radius:999px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.18);color:#fbbf24;font-size:10px;font-weight:900}
+    :root{--bg:#f3f5fa;--surface:#fff;--border:#e4e7ec;--text:#101828;--muted:#667085;--primary:#4f46e5;--primary2:#6366f1;--soft:#eef2ff}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:'Vazirmatn',sans-serif;background:radial-gradient(circle at 15% 10%,#ecebff 0,transparent 34%),radial-gradient(circle at 90% 85%,#edf2ff 0,transparent 30%),var(--bg);color:var(--text)}
+    body{min-height:100vh;display:grid;place-items:center;padding:16px}.shell{width:min(460px,100%)}
+    .card{background:rgba(255,255,255,.95);border:1px solid var(--border);border-radius:30px;padding:28px;box-shadow:0 28px 80px rgba(16,24,40,.1);backdrop-filter:blur(18px)}
+    .brand{text-align:center}.mark{width:60px;height:60px;margin:0 auto 14px;border-radius:20px;background:linear-gradient(135deg,var(--primary),var(--primary2));display:grid;place-items:center;color:#fff;font-size:27px;font-weight:900;box-shadow:0 18px 35px rgba(79,70,229,.24)}
+    .badge{display:inline-flex;padding:7px 11px;border-radius:999px;background:var(--soft);color:var(--primary);font-size:8px;font-weight:900}.brand h1{font-size:24px;margin:15px 0 7px;font-weight:900}.brand p{font-size:9px;color:var(--muted);margin:0 0 23px}
+    .field{display:grid;gap:7px;margin-bottom:13px}.field label{font-size:8px;font-weight:800;color:#344054}.input{width:100%;height:48px;border:1px solid var(--border);background:#f8fafc;border-radius:14px;padding:0 14px;outline:none;color:var(--text);transition:.2s}.input:focus{border-color:#a4bcfd;box-shadow:0 0 0 4px rgba(79,70,229,.07);background:#fff}.otp{text-align:center;letter-spacing:.3em;direction:ltr}
+    .btn{width:100%;height:50px;border:0;border-radius:14px;background:linear-gradient(135deg,var(--primary),var(--primary2));color:#fff;font-weight:900;box-shadow:0 14px 30px rgba(79,70,229,.22);margin-top:3px}.btn:disabled{opacity:.65;cursor:wait}.note{font-size:8px;color:#98a2b3;text-align:center;line-height:1.9;margin:16px 0 0}.secure{display:flex;justify-content:center;gap:6px;align-items:center;color:#667085;font-size:7px;margin-top:13px}.secure i{color:#039855}
+    .swal2-popup{font-family:'Vazirmatn',sans-serif!important;border-radius:24px!important}.swal2-confirm,.swal2-cancel{border-radius:12px!important;font-weight:900!important}
   </style>
 </head>
 <body>
-  <section class="card">
-    <div class="text-center mb-7">
-      <div class="badge mb-4">PRIVATE MANAGEMENT CONSOLE</div>
-      <h1 class="text-3xl font-black">SUPER <span class="text-yellow-400">ADMIN</span></h1>
-      <p class="text-[11px] text-slate-500 mt-2">E.BANK COMMAND CENTER</p>
-    </div>
-
-    <form id="login-form" class="space-y-4" autocomplete="off">
-      <div>
-        <label class="block text-[10px] font-bold text-slate-400 mb-2">ایمیل حساب مدیریت ارشد</label>
-        <input id="email" class="input" type="email" inputmode="email" autocomplete="username" required placeholder="ایمیل حساب Supabase">
-      </div>
-      <div>
-        <label class="block text-[10px] font-bold text-slate-400 mb-2">رمز حساب</label>
-        <input id="auth-password" class="input" type="password" autocomplete="current-password" required placeholder="رمز حساب Supabase">
-      </div>
-      <div>
-        <label class="block text-[10px] font-bold text-slate-400 mb-2">کلید اصلی COMMAND CENTER</label>
-        <input id="master-password" class="input" type="password" autocomplete="off" required placeholder="رمز اصلی">
-      </div>
-      <div>
-        <label class="block text-[10px] font-bold text-slate-400 mb-2">کد امنیتی مرحله دوم</label>
-        <input id="otp" class="input text-center tracking-[.35em]" type="text" inputmode="numeric" autocomplete="one-time-code" required placeholder="کد امنیتی">
-      </div>
-      <button id="login-btn" class="btn mt-2" type="submit">ورود امن به Command Center</button>
-    </form>
-
-    <p class="text-center text-[9px] text-slate-600 mt-6">این صفحه مستقل از Login اعضا و مدیران E.BANK است.</p>
-  </section>
-
+  <main class="shell">
+    <section class="card">
+      <div class="brand"><div class="mark">E</div><span class="badge">PRIVATE MANAGEMENT CONSOLE</span><h1>ورود به Super Admin</h1><p>E.BANK • Command Center</p></div>
+      <form id="login-form" autocomplete="off">
+        <div class="field"><label for="email">ایمیل حساب مدیریت ارشد</label><input id="email" class="input" type="email" inputmode="email" autocomplete="username" required placeholder="ایمیل حساب Supabase"></div>
+        <div class="field"><label for="auth-password">رمز حساب</label><input id="auth-password" class="input" type="password" autocomplete="current-password" required placeholder="رمز حساب Supabase"></div>
+        <div class="field"><label for="master-password">کلید اصلی Command Center</label><input id="master-password" class="input" type="password" autocomplete="off" required placeholder="رمز اصلی"></div>
+        <div class="field"><label for="otp">کد امنیتی مرحله دوم</label><input id="otp" class="input otp" type="text" inputmode="numeric" autocomplete="one-time-code" required placeholder="کد امنیتی"></div>
+        <button id="login-btn" class="btn" type="submit">ورود امن به Command Center</button>
+      </form>
+      <p class="note">این صفحه کاملاً مستقل از Login عمومی اعضا و مدیران E.BANK است.</p>
+      <div class="secure"><i class="fas fa-shield-halved"></i><span>محیط خصوصی مدیریت ارشد</span></div>
+    </section>
+  </main>
 <script>
-const SUPABASE_URL = 'https://kqnsbnpznkwkwukzokik.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxbnNibnB6bmt3a3d1a3pva2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDc4NjgsImV4cCI6MjA4MjEyMzg2OH0.dsqyFP37JyrfYDVwasNZW_Aid9ah0e6SxdnS8j8xV5s';
-const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth:{persistSession:true,storageKey:'ebank-super-admin-session',storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:false}
-});
-
-(async()=>{ await client.auth.signOut(); })();
-
-document.getElementById('login-form').addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const btn=document.getElementById('login-btn');
-  const email=document.getElementById('email').value.trim();
-  const authPassword=document.getElementById('auth-password').value;
-  const masterPassword=document.getElementById('master-password').value;
-  const otp=document.getElementById('otp').value.trim();
-  btn.disabled=true; btn.textContent='در حال احراز هویت...';
-
-  try{
-    const {data,error}=await client.auth.signInWithPassword({email,password:authPassword});
-    if(error || !data.user) throw new Error('ایمیل یا رمز حساب صحیح نیست.');
-
-    const {data:profile,error:profileError}=await client.from('members').select('id,full_name,is_super_admin,status').eq('id',data.user.id).single();
-    if(profileError || !profile || profile.is_super_admin!==true || profile.status==='blocked'){
-      await client.auth.signOut();
-      throw new Error('این حساب مجوز Super Admin ندارد.');
-    }
-
-    const {data:masterOk,error:masterError}=await client.rpc('verify_master_access',{input_password:masterPassword});
-    if(masterError || masterOk!==true){ await client.auth.signOut(); throw new Error('کلید اصلی اشتباه است.'); }
-
-    const {data:otpOk,error:otpError}=await client.rpc('verify_2fa_access',{user_provided_code:otp});
-    if(otpError || otpOk!==true){ await client.auth.signOut(); throw new Error('کد امنیتی مرحله دوم صحیح نیست.'); }
-
-    sessionStorage.setItem('super_admin_2fa','true');
-    sessionStorage.setItem('user_name',profile.full_name || 'E.BANK OWNER');
-    window.location.replace('super_admin.html');
-  }catch(err){
-    await Swal.fire({title:'ورود ناموفق',text:err.message || 'خطای ناشناخته',icon:'error',confirmButtonColor:'#fbbf24'});
-  }finally{
-    btn.disabled=false; btn.textContent='ورود امن به Command Center';
-  }
-});
+const SUPABASE_URL='https://kqnsbnpznkwkwukzokik.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxbnNibnB6bmt3a3d1a3pva2lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NDc4NjgsImV4cCI6MjA4MjEyMzg2OH0.dsqyFP37JyrfYDVwasNZW_Aid9ah0e6SxdnS8j8xV5s';
+const client=supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,storageKey:'ebank-super-admin-session',storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:false}});
+(async()=>{try{await client.auth.signOut()}catch(_){}})();
+document.getElementById('login-form').addEventListener('submit',async(e)=>{e.preventDefault();const btn=document.getElementById('login-btn');const email=document.getElementById('email').value.trim();const authPassword=document.getElementById('auth-password').value;const masterPassword=document.getElementById('master-password').value;const otp=document.getElementById('otp').value.trim();btn.disabled=true;btn.textContent='در حال احراز هویت...';try{const {data,error}=await client.auth.signInWithPassword({email,password:authPassword});if(error||!data.user)throw new Error('ایمیل یا رمز حساب صحیح نیست.');const {data:profile,error:profileError}=await client.from('members').select('id,full_name,is_super_admin,status').eq('id',data.user.id).single();if(profileError||!profile||profile.is_super_admin!==true||profile.status==='blocked'){await client.auth.signOut();throw new Error('این حساب مجوز Super Admin ندارد.')}const {data:masterOk,error:masterError}=await client.rpc('verify_master_access',{input_password:masterPassword});if(masterError||masterOk!==true){await client.auth.signOut();throw new Error('کلید اصلی اشتباه است.')}const {data:otpOk,error:otpError}=await client.rpc('verify_2fa_access',{user_provided_code:otp});if(otpError||otpOk!==true){await client.auth.signOut();throw new Error('کد امنیتی مرحله دوم صحیح نیست.')}sessionStorage.setItem('super_admin_2fa','true');sessionStorage.setItem('user_name',profile.full_name||'E.BANK OWNER');window.location.replace('super_admin.html')}catch(err){await Swal.fire({title:'ورود ناموفق',text:err.message||'خطای ناشناخته',icon:'error',confirmButtonColor:'#4f46e5'})}finally{btn.disabled=false;btn.textContent='ورود امن به Command Center'}});
 </script>
 </body>
 </html>

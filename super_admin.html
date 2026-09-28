@@ -1,270 +1,126 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>E.BANK | COMMAND CENTER</title>
-    
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- حتماً این خط رو قبل از فایل super_admin_app.js بذار 👇 -->
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
-<!-- حتماً این خط رو قبل از فایل super_admin_app.js بذار 👇 -->
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>E.BANK | SUPER ADMIN</title>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--border:#e6ebf2;--text:#101828;--muted:#667085;
+      --primary:#4f46e5;--primary-soft:#eef2ff;--success:#039855;--success-soft:#ecfdf3;--warning:#d97706;--warning-soft:#fff7ed;
+      --danger:#d92d20;--danger-soft:#fff1f0;--navy:#101828;--shadow:0 18px 48px rgba(16,24,40,.07)
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:'Vazirmatn',sans-serif}
+    body{overflow-x:hidden;-webkit-tap-highlight-color:transparent}
+    button,input{font:inherit}button{cursor:pointer}a{text-decoration:none}
+    ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-thumb{background:#cfd6df;border-radius:20px}
+    .shell{width:min(980px,100%);margin:auto;padding:10px 12px 18px}
+    .utility-row{display:flex;justify-content:flex-start;gap:8px;margin-bottom:8px}
+    .page-view{display:none}.page-view.active{display:block}.page-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;position:sticky;top:0;z-index:10;padding:8px 0;background:rgba(244,247,251,.96);backdrop-filter:blur(10px)}.page-back{height:40px;min-width:40px;border:1px solid var(--border);background:#fff;border-radius:14px;color:var(--primary);font-weight:900}.page-title{font-size:17px;font-weight:900;margin:0}.page-sub{font-size:7px;color:var(--muted);margin:2px 0 0}.full-list{display:grid;gap:9px}.full-bank{border:1px solid var(--border);background:#fff;border-radius:20px;padding:14px;box-shadow:var(--shadow);cursor:pointer}.full-bank:active{transform:scale(.99)}.full-bank-head{display:flex;justify-content:space-between;align-items:center;gap:10px}.full-bank-name{font-size:11px;font-weight:900}.full-bank-meta{font-size:7px;color:var(--muted);margin-top:4px;line-height:1.8}.full-profile{background:#fff;border:1px solid var(--border);border-radius:22px;padding:14px;box-shadow:var(--shadow)}.full-profile .profile-grid{margin-top:0}.page-section{margin-top:10px}.page-section-title{font-size:11px;font-weight:900;margin:0 0 8px}.page-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.page-request-list{display:grid;gap:9px}.page-request-card{border:1px solid var(--border);background:#fff;border-radius:20px;padding:13px;box-shadow:var(--shadow)}.page-request-card.approved{background:#fbfefc;border-color:#d8efe2}.page-request-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.page-request-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px}.page-request-actions .request-btn{width:100%}.page-empty{background:#fff;border:1px dashed #d0d5dd;border-radius:20px;padding:36px 15px;text-align:center;color:var(--muted);font-size:9px}.security-popup{width:min(92vw,430px)!important;overflow-x:hidden!important}.security-popup .swal2-html-container{overflow-x:hidden!important;padding:0 12px 12px!important}.security-popup .swal2-input{width:100%!important;max-width:100%!important;margin:8px 0!important;height:46px!important;box-sizing:border-box!important;font-size:14px!important}.security-popup .swal2-actions{flex-wrap:wrap;gap:8px}.security-popup .swal2-actions button{margin:0!important}
+    .utility-btn{height:38px;border:1px solid var(--border);background:rgba(255,255,255,.92);border-radius:15px;padding:0 13px;display:flex;align-items:center;gap:7px;color:#344054;font-size:9px;font-weight:900;box-shadow:0 8px 20px rgba(16,24,40,.04)}
+    .utility-btn.settings{width:40px;padding:0;justify-content:center;color:var(--primary)}
+    .utility-btn.off{color:#475467}
+    .central-card{position:relative;overflow:hidden;background:linear-gradient(145deg,#0c1527 0%,#1a2742 55%,#35477f 100%);border-radius:28px;padding:17px;box-shadow:0 24px 55px rgba(16,24,40,.18);color:#fff}
+    .central-card:before{content:"";position:absolute;left:-85px;bottom:-115px;width:245px;height:245px;border-radius:50%;background:rgba(99,102,241,.24);filter:blur(5px)}
+    .central-card:after{content:"";position:absolute;right:-85px;top:-105px;width:240px;height:240px;border-radius:50%;background:rgba(255,255,255,.07)}
+    .central-head{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.central-title{margin:0;font-size:14px;font-weight:900}.central-sub{margin:4px 0 0;color:#c5cde0;font-size:8px;line-height:1.8}.central-badge{padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.1);font-size:7px;font-weight:900;white-space:nowrap}
+    .card-visual{position:relative;z-index:1;margin-top:13px;min-height:164px;padding:16px;border-radius:22px;background:linear-gradient(135deg,#fff 0%,#edf1f6 100%);color:#101828;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.75)}
+    .card-visual:before{content:"";position:absolute;left:-55px;bottom:-82px;width:170px;height:170px;border-radius:50%;background:rgba(79,70,229,.12)}
+    .card-topline{display:flex;align-items:center;justify-content:space-between;position:relative;z-index:1}.card-brand{font-size:13px;font-weight:900}.chip{width:38px;height:28px;border-radius:8px;background:linear-gradient(135deg,#d6dbe3,#9aa5b5)}
+    .display-number{position:relative;z-index:1;margin-top:26px;font:900 18px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:1.7px;direction:ltr;text-align:right}
+    .display-holder{position:relative;z-index:1;margin-top:19px;display:flex;align-items:end;justify-content:space-between;gap:10px}.display-label{font-size:6px;color:#98a2b3;letter-spacing:.4px}.display-name{margin-top:3px;font-size:11px;font-weight:900}
+    .hero{padding:18px 2px 10px}.eyebrow{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:7px;font-weight:900}.hero h1{margin:8px 0 4px;font-size:23px;line-height:1.3;font-weight:900}.hero p{margin:0;color:var(--muted);font-size:8px;line-height:1.9}.welcome{margin-top:4px;color:#98a2b3;font-size:7px}
+    .kpi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.kpi{min-height:112px;padding:13px;border:1px solid var(--border);background:var(--surface);border-radius:21px;box-shadow:var(--shadow);text-align:right}.kpi.clickable{transition:transform .15s ease,box-shadow .15s ease}.kpi.clickable:active{transform:scale(.985)}.kpi-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.kpi-label{font-size:8px;font-weight:800;color:var(--muted)}.kpi-icon{width:31px;height:31px;border-radius:11px;display:grid;place-items:center;background:var(--primary-soft);color:var(--primary);font-size:10px}.kpi.success .kpi-icon{background:var(--success-soft);color:var(--success)}.kpi.warning .kpi-icon{background:var(--warning-soft);color:var(--warning)}.kpi-value{margin-top:10px;font-size:21px;font-weight:900}.kpi-meta{margin-top:4px;color:#98a2b3;font-size:7px}
+    .modal-list{direction:rtl;text-align:right;max-height:64vh;overflow:auto;padding:2px}.modal-card{border:1px solid #e8ebf0;background:#fff;border-radius:18px;padding:12px;margin-bottom:8px}.modal-card:last-child{margin-bottom:0}.modal-card.clickable{cursor:pointer}.modal-row{display:flex;align-items:center;justify-content:space-between;gap:9px}.modal-main{min-width:0}.modal-title{font-size:10px;font-weight:900}.modal-sub{margin-top:3px;font-size:7px;color:#98a2b3;line-height:1.8}.modal-tag{padding:5px 7px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:7px;font-weight:900;white-space:nowrap}.modal-tag.success{background:var(--success-soft);color:var(--success)}.modal-tag.warning{background:var(--warning-soft);color:var(--warning)}.modal-tag.danger{background:var(--danger-soft);color:var(--danger)}
+    .profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.profile-item{border:1px solid #e8ebf0;background:#f9fbfd;border-radius:14px;padding:10px}.profile-label{font-size:7px;color:#98a2b3}.profile-value{margin-top:4px;font-size:9px;font-weight:900;line-height:1.6}.profile-wide{grid-column:1/-1}
+    .action-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}.action-btn{height:40px;border:0;border-radius:13px;font-size:8px;font-weight:900}.action-btn.primary{background:var(--primary);color:#fff}.action-btn.secondary{background:#eef2ff;color:var(--primary);border:1px solid #dfe3ff}.action-btn.danger{background:var(--danger-soft);color:var(--danger)}.action-btn.success{background:var(--success-soft);color:var(--success)}.action-btn.disabled{background:#f2f4f7;color:#98a2b3;cursor:not-allowed}
+    .request-card{border:1px solid #e8ebf0;border-radius:18px;padding:12px;background:#fff;margin-bottom:8px}.request-card.approved{background:#fbfefc;border-color:#d8efe2}.request-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.request-amount{font-size:13px;font-weight:900}.request-meta{margin-top:3px;color:#98a2b3;font-size:7px;line-height:1.8}.request-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}.request-btn{height:36px;border:0;border-radius:11px;font-size:7px;font-weight:900}.request-btn.approve-sub{background:var(--primary-soft);color:var(--primary)}.request-btn.approve-quota{background:var(--success-soft);color:var(--success)}.request-btn.receipt{background:#f2f4f7;color:#475467}.request-btn.delete{background:var(--danger-soft);color:var(--danger)}.request-btn.disabled{background:#f2f4f7;color:#98a2b3;cursor:not-allowed}
+    .empty{padding:28px 12px;text-align:center;color:#98a2b3;font-size:8px}
+    .settings-block{border:1px solid #e8ebf0;border-radius:18px;background:#fff;padding:12px;margin-bottom:9px}.settings-title{font-size:10px;font-weight:900}.settings-sub{font-size:7px;color:#98a2b3;margin-top:3px}.settings-fields{display:grid;gap:8px;margin-top:10px}.field-label{font-size:7px;color:#667085}.field-input{width:100%;height:42px;border:1px solid #dfe4eb;border-radius:13px;padding:0 12px;outline:none;background:#f8fafc;color:#101828;font-size:10px}.field-input:focus{border-color:#b8c0ff;background:#fff}.save-btn{width:100%;height:42px;border:0;border-radius:13px;background:var(--primary);color:#fff;font-size:8px;font-weight:900;margin-top:8px}
+    .kpi-wide{grid-column:1/-1;min-height:96px}
+    .filter-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.filter-chip{height:34px;padding:0 13px;border:1px solid var(--border);background:#fff;border-radius:999px;font-size:9px;font-weight:900;color:#475467}.filter-chip.active{background:var(--primary);border-color:var(--primary);color:#fff}
+    .report-message{margin-top:10px;padding:10px;border-radius:14px;background:#f9fbfd;border:1px solid #e8ebf0;font-size:10px;line-height:2;white-space:pre-wrap;word-break:break-word}.report-call{display:inline-block;margin-top:8px;font-size:9px;font-weight:800;color:var(--primary)}
+    .report-reply{margin-top:8px;padding:10px;border-radius:14px;background:#ecfdf3;border:1px solid #b7ecc9}.report-reply-label{font-size:8px;font-weight:900;color:#067647;margin-bottom:4px}.report-reply-text{font-size:10px;line-height:1.9;color:#166534;white-space:pre-wrap;word-break:break-word}
+    .report-reply-input{width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:14px;border:1px solid var(--border);font-family:inherit;font-size:10px;line-height:1.9;resize:vertical;min-height:56px}
+    @media(max-width:560px){.shell{padding:8px 9px 15px}.central-card{border-radius:25px;padding:14px}.card-visual{min-height:160px}.hero h1{font-size:21px}.kpi{min-height:108px;padding:12px}.profile-grid{grid-template-columns:1fr}.profile-wide{grid-column:auto}.request-actions,.action-grid{grid-template-columns:1fr}.swal2-popup{width:calc(100% - 14px)!important;border-radius:24px!important}}
+  </style>
 </head>
-   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&display=swap');
-    
-    html, body { height: 100%; margin: 0; }
-    body { 
-        font-family: 'Vazirmatn', sans-serif; 
-        background-color: #020617; 
-        color: #f8fafc;
-        display: flex;
-        flex-direction: column;
-        min-height: 100vh;
-        -webkit-tap-highlight-color: transparent;
-    }
+<body>
+  <main class="shell">
+    <div class="utility-row">
+      <button class="utility-btn settings" type="button" onclick="openSettings()" title="تنظیمات"><i class="fas fa-gear"></i></button>
+      <button class="utility-btn off" type="button" onclick="turnOffSuperAdmin()"><i class="fas fa-power-off"></i><span>TURN OFF</span></button>
+    </div>
 
-    main { flex: 1 0 auto; padding: 15px; width: 100%; box-sizing: border-box; }
-    footer { flex-shrink: 0; width: 100%; text-align: center; padding: 40px 0; }
-
-    /* اصلاح عرض کادرها برای بزرگتر شدن 👇 */
-    .glass-card {
-        background: rgba(30, 41, 59, 0.7) !important;
-        backdrop-filter: blur(12px);
-        border: 1.5px solid rgba(251, 191, 36, 0.3) !important;
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-        width: 100%; /* استفاده از تمام عرض */
-        border-radius: 2.5rem;
-        margin-bottom: 20px;
-        padding: 25px;
-        box-sizing: border-box;
-    }
-
-    /* استایل دکمه‌های کرکره‌ای 👇 */
-    .toggle-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 20px;
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: 20px;
-        cursor: pointer;
-        border: 1px solid rgba(255,255,255,0.05);
-        transition: all 0.3s;
-    }
-    .toggle-header:active { background: rgba(255, 255, 255, 0.08); }
-    
-    .collapsible-content {
-        max-height: 0;
-        overflow: hidden;
-        transition: max-height 0.5s cubic-bezier(0, 1, 0, 1);
-    }
-    .collapsible-content.open {
-        max-height: 2000px; /* یک عدد بزرگ برای باز شدن کامل */
-        transition: max-height 0.8s ease-in-out;
-        padding-top: 20px;
-    }
-
-    .rotate-icon { transition: transform 0.3s; }
-    .rotate-icon.open { transform: rotate(180deg); }
-
-    ::-webkit-scrollbar { display: none; }
-</style>
-
-<body class="p-0">
-
-    <header class="p-6 flex justify-between items-center">
+    <div id="dashboard-view">
+    <section class="central-card">
+      <div class="central-head">
         <div>
-            <h1 class="text-2xl font-[900] text-white">COMMAND <span class="text-yellow-500">CENTER</span></h1>
-            <p class="text-[8px] text-slate-500 font-black tracking-widest mt-1">SYSTEM OVERSEER ACTIVE</p>
+          <h2 class="central-title">حساب دریافت مرکزی</h2>
+          <p class="central-sub">حساب اصلی دریافت پرداخت‌های E.BANK</p>
         </div>
-        <button onclick="location.href='admin.html'" class="w-12 h-12 glass-card !m-0 !p-0 flex items-center justify-center text-yellow-500">
-            <i class="fas fa-th-large text-xl"></i>
-        </button>
-    </header>
+        <span class="central-badge">مرکزی</span>
+      </div>
+      <div class="card-visual">
+        <div class="card-topline"><div class="card-brand">E.BANK</div><div class="chip"></div></div>
+        <div id="master-card-preview" class="display-number">•••• •••• •••• ••••</div>
+        <div class="display-holder"><div><div class="display-label">CARD HOLDER</div><div id="master-card-name-preview" class="display-name">نام صاحب حساب</div></div><div class="display-label">SECURE</div></div>
+      </div>
+    </section>
 
-    <main>
-        <!-- تنظیمات کارت (بزرگ) -->
-       <!-- بخش کارت بانکی هوشمند ستاد -->
-<!-- بخش کارت بانکی هوشمند ستاد - نسخه اصلاح شده و فیت -->
-<section class="mb-10 px-2">
-    <div class="relative w-full rounded-[2rem] p-6 overflow-hidden shadow-2xl border border-white/10" 
-         style="background: linear-gradient(135deg, #1e293b 0%, #020617 100%); min-height: 200px;">
-        
-        <!-- ردیف اول: لوگو و چیپ -->
-        <div class="flex justify-between items-center mb-8">
-            <h2 class="text-xl font-[900] text-yellow-500 tracking-tighter">E<span class="text-white">.</span>BANK</h2>
-            <!-- آیکون چیپ بانکی -->
-            <div class="w-10 h-8 bg-gradient-to-br from-yellow-600 to-yellow-300 rounded-md opacity-80 flex flex-col justify-around p-1">
-                <div class="h-[1px] bg-black/20 w-full"></div>
-                <div class="h-[1px] bg-black/20 w-full"></div>
-                <div class="h-[1px] bg-black/20 w-full"></div>
-            </div>
-        </div>
+    <section class="hero">
+      <span class="eyebrow"><i class="fas fa-crown"></i> SUPER ADMIN</span>
+      <h1>مرکز کنترل مالی و عملیاتی</h1>
+      <p>بانک‌ها و درخواست‌های مالی و گزارش‌های مدیران را از همین کارت‌های اصلی مدیریت کنید.</p>
+      <div id="welcome-name" class="welcome"></div>
+    </section>
 
-        <!-- ردیف دوم: شماره کارت (فیکس شده برای موبایل) -->
-        <div class="mb-6">
-            <input type="tel" id="master-card-input" placeholder="0000 0000 0000 0000" maxlength="16"
-                class="w-full bg-transparent border-none text-center text-[1.35rem] font-black text-white tracking-[0.05em] outline-none placeholder:text-slate-800"
-                style="font-family: monospace;">
-        </div>
-        
-        <!-- ردیف سوم: صاحب حساب و نشان امنیتی -->
-        <div class="flex justify-between items-end">
-            <div class="text-right flex-1">
-                <p class="text-[7px] text-slate-500 uppercase font-black mb-1 tracking-widest">Card Holder</p>
-                <input type="text" id="master-card-name-input" placeholder="نام صاحب حساب"
-                    class="w-full bg-transparent border-none text-sm font-bold text-yellow-500 outline-none placeholder:text-slate-800">
-            </div>
-            
-            <!-- آیکون ویزا/مستر کارت سمبلیک -->
-            <div class="flex gap-1 opacity-40 ml-4">
-                <div class="w-7 h-7 bg-rose-600 rounded-full"></div>
-                <div class="w-7 h-7 bg-amber-500 rounded-full -ml-4"></div>
-            </div>
-        </div>
-
-        <!-- افکت نوری بسیار ملایم -->
-        <div class="absolute -top-10 -right-10 w-32 h-32 bg-yellow-500/10 rounded-full blur-3xl"></div>
+    <section class="kpi-grid">
+      <button class="kpi clickable" type="button" onclick="showBankList()">
+        <div class="kpi-head"><span class="kpi-label">بانک‌های موجود</span><span class="kpi-icon"><i class="fas fa-building-columns"></i></span></div>
+        <div id="total-pools" class="kpi-value">۰</div>
+        <div class="kpi-meta">برای دیدن لیست بانک‌ها لمس کنید</div>
+      </button>
+      <div class="kpi success">
+        <div class="kpi-head"><span class="kpi-label">درآمد تأییدشده</span><span class="kpi-icon"><i class="fas fa-arrow-trend-up"></i></span></div>
+        <div id="total-revenue-amt" class="kpi-value">۰</div>
+        <div class="kpi-meta">جمع مبالغ تأییدشده</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head"><span class="kpi-label">کاربران</span><span class="kpi-icon"><i class="fas fa-users"></i></span></div>
+        <div id="total-users" class="kpi-value">۰</div>
+        <div class="kpi-meta">اعضای ثبت‌شده</div>
+      </div>
+      <button id="pending-card" class="kpi warning clickable" type="button" onclick="showPendingRequests()">
+        <div class="kpi-head"><span class="kpi-label">وضعیت فیش‌ها</span><span class="kpi-icon"><i class="fas fa-receipt"></i></span></div>
+        <div id="pending-count" class="kpi-value">۰</div>
+        <div class="kpi-meta">آخرین درخواست‌های تأییدنشده</div>
+      </button>
+      <button class="kpi clickable" type="button" onclick="showFeedbackReports()">
+        <div class="kpi-head"><span class="kpi-label">گزارش و پیشنهاد مدیران</span><span class="kpi-icon"><i class="fas fa-bug"></i></span></div>
+        <div id="feedback-count" class="kpi-value">۰</div>
+        <div class="kpi-meta">برای دیدن گزارش‌ها لمس کنید</div>
+      </button>
+      <button id="reset-card" class="kpi warning clickable" type="button" onclick="showResetRequests()">
+        <div class="kpi-head"><span class="kpi-label">بازیابی رمز مدیران</span><span class="kpi-icon"><i class="fas fa-key"></i></span></div>
+        <div id="reset-count" class="kpi-value">۰</div>
+        <div class="kpi-meta">درخواست‌های در انتظار</div>
+      </button>
+      <button id="pending-pools-card" class="kpi warning clickable" type="button" onclick="showPendingPools()">
+        <div class="kpi-head"><span class="kpi-label">بانک‌های در انتظار تأیید</span><span class="kpi-icon"><i class="fas fa-hourglass-half"></i></span></div>
+        <div id="pending-pools-count" class="kpi-value">۰</div>
+        <div class="kpi-meta">تازه‌تأسیس، هنوز فعال نشده</div>
+      </button>
+    </section>
     </div>
-
-    <!-- دکمه ذخیره زیر کارت -->
-    <button onclick="saveMasterCard()" class="btn-action w-full mt-4 bg-yellow-500 text-slate-950 py-4 rounded-2xl font-[900] text-sm shadow-xl shadow-yellow-500/10 flex items-center justify-center gap-2">
-        <i class="fas fa-save"></i>
-        ذخیره تنظیمات کارت بانکی
-    </button>
-</section>
-
-        <!-- خزانه کل -->
-        <section class="glass-card">
-            <p class="text-[10px] font-black text-yellow-500/60 uppercase mb-2">Total Revenue</p>
-            <h2 id="total-revenue-amt" class="text-4xl font-[900] text-white tracking-tighter">۰ تومان</h2>
-            <div class="flex gap-3 mt-4">
-                <div class="bg-white/5 p-3 rounded-2xl flex-1 text-center border border-white/5">
-                    <p class="text-[20px] text-slate-500">گروه‌ها: <span id="total-pools" class="text-yellow-500 font-black">۰</span></p>
-                </div>
-                <div class="bg-white/5 p-3 rounded-2xl flex-1 text-center border border-white/5">
-                    <p class="text-[20px] text-slate-500">کاربران: <span id="total-users" class="text-white font-black">۰</span></p>
-                </div>
-            </div>
-        </section>
-
-        <!-- بخش کرکره‌ای: تراکنش‌های مالی 👇 -->
-        <section class="mb-6">
-            <div class="toggle-header" onclick="toggleAccordion('billing-box', 'icon1')">
-                <div class="flex items-center gap-3">
-                    <i class="fas fa-file-invoice-dollar text-yellow-500"></i>
-                    <h3 class="text-sm font-black text-white">گزارش واریزی مدیران</h3>
-                </div>
-                <div class="flex items-center gap-3">
-                    <button onclick="event.stopPropagation(); exportBillingToExcel()" class="bg-emerald-600/20 text-emerald-400 p-2 rounded-lg text-[10px]"><i class="fas fa-file-excel"></i></button>
-                    <i id="icon1" class="fas fa-chevron-down text-slate-500 rotate-icon"></i>
-                </div>
-            </div>
-            <div id="billing-box" class="collapsible-content">
-                <div id="billing-container" class="space-y-3">
-                    <!-- لیست تراکنش‌ها -->
-                </div>
-            </div>
-        </section>
-
-        <!-- بخش کرکره‌ای: مدیریت بانک‌ها 👇 -->
-        <section class="mb-6">
-            <div class="toggle-header" onclick="toggleAccordion('pools-box', 'icon2')">
-                <div class="flex items-center gap-3">
-                    <i class="fas fa-layer-group text-yellow-500"></i>
-                    <h3 class="text-sm font-black text-white">نظارت بر بانک‌های موجود</h3>
-                </div>
-                <i id="icon2" class="fas fa-chevron-down text-slate-500 rotate-icon"></i>
-            </div>
-            <div id="pools-box" class="collapsible-content">
-                <div id="pools-list" class="space-y-4">
-                    <!-- لیست صندوق‌ها -->
-                </div>
-            </div>
-        </section>
-        
-        <!-- بخش کرکره‌ای: تنظیمات امنیتی ستاد 👇 -->
-<!-- بخش کرکره‌ای: مدیریت امنیت دو مرحله‌ای 👇 -->
-<section class="mb-10 px-2">
-    <div class="toggle-header !border-rose-500/30" onclick="toggleAccordion('security-box', 'icon3')" 
-         style="background: rgba(244, 63, 94, 0.05);">
-        <div class="flex items-center gap-3">
-            <!-- در فایل super_admin.html بخش هدر کرکره امنیت را به این شکل اصلاح کن 👇 -->
-<div class="w-10 h-10 bg-rose-500/20 rounded-2xl flex items-center justify-center border border-rose-500/30">
-    <i class="fas fa-fingerprint text-rose-500 text-lg"></i>
-</div>
-            <div>
-                <h3 class="text-sm font-[900] text-white">امنیت و کلیدهای دسترسی</h3>
-                <p class="text-[7px] text-rose-500/60 uppercase font-black tracking-widest">Master Security Protocol</p>
-            </div>
-        </div>
-        <i id="icon3" class="fas fa-chevron-down text-slate-500 rotate-icon"></i>
-    </div>
-
-    <div id="security-box" class="collapsible-content">
-        <!-- محفظه کلیدها -->
-        <div class="bg-slate-900/50 rounded-[2rem] p-6 border border-white/5 mt-4 space-y-4">
-            
-            <!-- مرحله اول: رمز عبور متنی -->
-            <div class="p-4 bg-white/5 rounded-2xl border border-white/5">
-                <p class="text-[10px] text-slate-400 mb-3 flex items-center gap-2">
-                    <span class="w-1 h-1 bg-rose-500 rounded-full"></span>
-                    لایه اول: رمز عبور ورود به ستاد
-                </p>
-                <button onclick="handleChangeMasterPassword()" class="btn-action w-full bg-slate-950 text-white border border-white/10 py-4 rounded-xl font-black text-[10px] flex items-center justify-center gap-2">
-                    <i class="fas fa-fingerprint text-rose-500"></i>
-                    تغییر پسورد اصلی (STEP 1)
-                </button>
-            </div>
-
-            <!-- مرحله دوم: عدد مخفی فرمول -->
-            <div class="p-4 bg-white/5 rounded-2xl border border-white/5">
-                <p class="text-[10px] text-slate-400 mb-3 flex items-center gap-2">
-                    <span class="w-1 h-1 bg-yellow-500 rounded-full"></span>
-                    لایه دوم: عدد ثابت فرمول ریاضی (2FA)
-                </p>
-                <button onclick="handleChangeSecretNumber()" class="btn-action w-full bg-slate-950 text-white border border-white/10 py-4 rounded-xl font-black text-[10px] flex items-center justify-center gap-2">
-                    <i class="fas fa-calculator text-yellow-500"></i>
-                    تغییر عدد مخفی (STEP 2)
-                </button>
-            </div>
-
-            <p class="text-[8px] text-center text-slate-600 font-bold italic">
-                تغییر این کلیدها بلافاصله اعمال شده و در ورود بعدی الزامی است.
-            </p>
-        </div>
-        <!-- در فایل super_admin.html داخل کرکره امنیت -->
-<div class="p-4 bg-white/5 rounded-2xl border border-white/5 mt-4">
-    <p class="text-[10px] text-slate-400 mb-3 flex items-center gap-2">
-        <span class="w-1 h-1 bg-blue-500 rounded-full"></span>
-        ماشه ورود مخفی (عدد ثابت کلیک)
-    </p>
-    <div class="flex gap-2">
-        <input type="number" id="click-constant-input" class="flex-1 bg-slate-950 border-none rounded-xl p-3 text-center text-blue-400 font-black text-sm outline-none">
-        <button onclick="saveClickConstant()" class="bg-blue-600 text-white px-4 rounded-xl font-bold text-xs btn-tap">ذخیره</button>
-    </div>
-</div>
-    </div>
-</section>
-        
-        
-    </main>
-
-    <footer>
-        <p class="text-[11px] font-black text-slate-500 uppercase tracking-[0.4em]">
-            Designed by <span class="text-yellow-500">EDDIE</span>
-            <br>
-            <span class="text-[8px] opacity-20 mt-1 block">COMMAND CENTER V3.5</span>
-        </p>
-    </footer>
-
-    <script src="super_admin_app.js"></script>
-   
+    <section id="page-view" class="page-view"></section>
+  </main>
+  <script src="super_admin_app.js"></script>
 </body>
 </html>

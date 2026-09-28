@@ -215,6 +215,17 @@ async function handleLogin() {
 
         if (dbErr) throw new Error("پروفایل شما یافت نشد! ابتدا بانک را تأسیس کنید.");
 
+        // کد بانک واردشده باید واقعاً بانکِ خودِ همین حساب باشد
+        if (String(profile.pool_id) !== String(pool.id)) {
+            await supabaseClient.auth.signOut();
+            throw new Error("این حساب متعلق به بانک با کد وارد‌شده نیست ❌");
+        }
+        // این ورودیِ اعضا/مدیران است؛ حساب سوپر ادمین از super-admin-login.html وارد شود
+        if (profile.is_super_admin === true) {
+            await supabaseClient.auth.signOut();
+            throw new Error("این حساب مخصوص Super Admin است.");
+        }
+
         // ۵. ذخیره نشست در حافظه موقت (Session)
         sessionStorage.setItem('user_id', profile.id);
         sessionStorage.setItem('pool_id', profile.pool_id);
@@ -265,32 +276,27 @@ async function createNewPool() {
 
         if (authErr) throw authErr;
 
-        // ۳. ساخت ردیف صندوق در جدول pools
-        const { data: poolData, error: pErr } = await supabaseClient
-            .from('pools')
-            .insert([{ pool_name: pName, pool_code: pCode, member_capacity: 10 }])
-            .select();
+        // ۳-۵. ساخت بانک + ثبت مدیر + تنظیمات اولیه، همه یک‌جا و اتمی (RPC)
+        // (دیگه insert مستقیم روی pools/members مجاز نیست؛ برای همینم اگه یه جای این تابع بخوره
+        // به خطا، هیچی نصفه‌کاره نمی‌مونه — یا کامل انجام می‌شه یا کامل لغو.)
+        const { error: rpcErr } = await supabaseClient.rpc('public_create_pool_request', {
+            pool_name_param: pName,
+            pool_code_param: pCode,
+            manager_name_param: mName,
+            mobile_param: cleanMobile,
+            member_capacity_param: 10
+        });
 
-        if (pErr) throw new Error("این کد بانک قبلاً رزرو شده است.");
-        const newPoolId = poolData[0].id;
+        if (rpcErr) throw rpcErr;
+        await supabaseClient.auth.signOut();
 
-        // ۴. ثبت مدیر در جدول اعضا (وصل کردن به UUID سرور)
-        const { error: mErr } = await supabaseClient.from('members').insert([{ 
-            id: authData.user.id, 
-            pool_id: newPoolId, 
-            full_name: mName, 
-            mobile: cleanMobile, 
-            is_admin: true, 
-            is_super_admin: true,
-            credit_score: 100
-        }]);
-
-        if (mErr) throw mErr;
-
-        // ۵. تنظیمات اولیه مبالغ
-        await supabaseClient.from('settings').insert([{ pool_id: newPoolId, base_amount: 2000000, won_amount: 2500000 }]);
-
-        await Swal.fire({ title: 'بانک تأسیس شد! 🎊', text: 'تبریک، حالا می‌توانید لاگین کنید.', icon: 'success' });
+        await Swal.fire({
+            title: 'ثبت‌نام و احراز هویت شما انجام شد ✅',
+            text: 'بعد از بررسی و تأیید سوپر ادمین، می‌توانید با همین مشخصات وارد شوید.',
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
         window.location.replace('index.html');
 
     } catch (err) {

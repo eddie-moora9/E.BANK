@@ -312,18 +312,36 @@ updateTaskBadge(pId); // چک کردن مداوم وضعیت فیش‌ها ✅
 
 // ۲. حالا موتور اصلی برنامه
 document.addEventListener('DOMContentLoaded', async () => {
-    // حذف اسپلش (کدهای قبلی خودت...)
-    setTimeout(() => {
-        const splash = document.getElementById('splash-screen');
-        if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 700); }
-    }, 2500);
+    // اسپلش اسکرین جدید خودش رو مدیریت می‌کنه (اسکریپت داخل admin.html)
+
+    // اگه از همون اول اینترنت وصل نیست، حتی تلاش نکن وارد پنل بشه
+    if (!navigator.onLine) {
+        if (typeof window.showNetworkError === 'function') window.showNetworkError();
+        return;
+    }
 
     if (typeof initSupabase === 'function') initSupabase();
     if (!supabaseClient) return;
 
+    let networkFailed = false;
+
     try {
         const { data: { session } } = await supabaseClient.auth.getSession();
         if (!session) { window.location.replace('index.html'); return; }
+
+        // اگر رمز مدیر توسط سوپر ادمین بازنشانی شده و هنوز رمز جدید انتخاب نشده، وارد پنل نشو
+        const { data: pwFlag } = await supabaseClient.from('members').select('must_change_password, is_super_admin').eq('id', session.user.id).maybeSingle();
+        if (pwFlag && pwFlag.must_change_password === true) {
+            await supabaseClient.auth.signOut();
+            window.location.replace('index.html');
+            return;
+        }
+        // پنل مدیر مخصوص مدیران بانک است؛ حساب سوپر ادمین باید از super-admin-login.html وارد شود
+        if (pwFlag && pwFlag.is_super_admin === true) {
+            await supabaseClient.auth.signOut();
+            window.location.replace('index.html');
+            return;
+        }
 
         let _PID = sessionStorage.getItem('pool_id');
         if (!_PID || _PID === "null") {
@@ -353,13 +371,26 @@ document.addEventListener('DOMContentLoaded', async () => {
             loadCurrentConfig(_PID);
            updateCapacityDisplay(_PID);
             updateTaskBadge(_PID);
+            refreshReplyNotifBadge();
+            initChatUnreadWatcher();
             loadPendingReceipts(_PID);
        
             
             if (typeof initSecurityMonitor === 'function') initSecurityMonitor();
         }
 
-    } catch (err) { console.error(err); }
+    } catch (err) {
+        console.error(err);
+        const looksLikeNetworkError = !navigator.onLine || /fetch|network|Failed to fetch/i.test(err?.message || '');
+        if (looksLikeNetworkError) {
+            networkFailed = true;
+            if (typeof window.showNetworkError === 'function') window.showNetworkError();
+        }
+    } finally {
+        // اسپلش منتظر همین سیگناله تا از ۹۲٪ به ۱۰۰٪ بره و محو بشه
+        // (اگه قطعی اینترنت بود، عمداً صدا نمی‌زنیم تا کاربر وارد پنل نشه)
+        if (!networkFailed && typeof window.finishSplash === 'function') window.finishSplash();
+    }
 });
 /************************************************
  * تابع کمکی برای بررسی امنیت و حجم فایل‌ها
@@ -493,8 +524,26 @@ window.updateStatus = async function(id, newStatus) {
                     // خیریه: سکه‌ی نسبت به مبلغ، بدون ارتباط با روز پرداخت
                     const rate = Number(set?.coin_charity_rate) || 10000;
                     rawChange = Math.floor(Number(tx.amount) / rate);
+                } else if (tx.category === 'emergency' || tx.category === 'coin_assistance') {
+                    // مساعده و مساعده‌ی سکه‌ای: سکه نسبت به سررسیدی که موقع تایید تعیین شده، نه ماه تقویمی
+                    const dueField = tx.category === 'emergency' ? 'emergency_due_date' : 'coin_assistance_due_date';
+                    const dueDateStr = mem[dueField];
+
+                    const winDays = Number(set?.coin_window_days) || 10;
+                    const perDay = Number(set?.coin_per_day) || 2;
+                    const peak = perDay * winDays;
+
+                    if (!dueDateStr) {
+                        rawChange = 0; // بدهی قدیمی بدون سررسید ثبت‌شده، بی‌طرف بمون
+                    } else {
+                        const txDate = new Date(tx.created_at);
+                        const dueDate = new Date(dueDateStr);
+                        const daysBeforeDue = Math.round((dueDate - txDate) / 86400000); // مثبت = زودتر، منفی = معوقه
+
+                        rawChange = daysBeforeDue >= winDays ? peak : perDay * daysBeforeDue;
+                    }
                 } else {
-                    // ۴. سیستم سکه (جایگزین امتیاز ۰-۱۰۰ قدیمی)
+                    // ۴. سیستم سکه (جایگزین امتیاز ۰-۱۰۰ قدیمی) — فقط برای قسط ماهانه
                     // مبنا: تاریخ ثبت فیش توسط عضو (100% طبق تایید خودت)
                     // فاصله از نزدیک‌ترین یکم ماه (این ماه یا ماه بعد) رو حساب می‌کنیم
                     // تا پرداخت آخر ماه هم به‌درستی «زودتر از موعد» شناخته بشه
@@ -543,10 +592,17 @@ window.updateStatus = async function(id, newStatus) {
             text: 'تغییرات ثبت شد ✅',
             icon: 'success',
             confirmButtonColor: '#10b981',
-            customClass: { popup: 'rounded-[2.5rem]' }
+            customClass: { popup: 'rounded-[2.5rem]' },
+            timer: 1200,
+            showConfirmButton: false
         });
 
-        location.reload();
+        // رفرش بخش‌های مرتبط بدون لود کامل صفحه
+        if (typeof loadPendingReceipts === 'function') loadPendingReceipts(myPoolId);
+        if (typeof loadOpsTabContent === 'function') loadOpsTabContent(myPoolId);
+        if (typeof calculateStats === 'function') calculateStats(myPoolId);
+        if (typeof loadAllMembers === 'function') loadAllMembers(myPoolId);
+        if (typeof loadTransactionLog === 'function') loadTransactionLog(myPoolId);
 
     } catch (e) {
         console.error("Critical Update Error:", e);
@@ -1046,6 +1102,60 @@ window.switchToMemberPanel = async function() {
 };
 
 /************************************************
+ * تغییر رمز عبور توسط خود مدیر — از همبرگر منو
+ ************************************************/
+window.openChangePasswordModal = async function() {
+    const inputStyle = 'width:85%; max-width:100%; box-sizing:border-box; margin:8px auto;';
+    const res = await Swal.fire({
+        title: 'تغییر رمز عبور',
+        html: `
+            <input id="cp-old" type="password" class="swal2-input" placeholder="رمز فعلی" autocomplete="current-password" style="${inputStyle}">
+            <input id="cp-new1" type="password" class="swal2-input" placeholder="رمز جدید" autocomplete="new-password" style="${inputStyle}">
+            <input id="cp-new2" type="password" class="swal2-input" placeholder="تکرار رمز جدید" autocomplete="new-password" style="${inputStyle}">
+        `,
+        confirmButtonText: 'تغییر رمز',
+        cancelButtonText: 'انصراف',
+        showCancelButton: true,
+        focusConfirm: false,
+        confirmButtonColor: '#4f46e5',
+        customClass: { popup: 'rounded-[2.5rem]' },
+        preConfirm: async () => {
+            const oldPass = document.getElementById('cp-old').value;
+            const p1 = document.getElementById('cp-new1').value;
+            const p2 = document.getElementById('cp-new2').value;
+            if (!oldPass || !p1 || !p2) { Swal.showValidationMessage('همه‌ی کادرها را پر کنید'); return false; }
+            if (p1.length < 6) { Swal.showValidationMessage('رمز جدید حداقل ۶ کاراکتر باشد'); return false; }
+            if (p1 !== p2) { Swal.showValidationMessage('تکرار رمز با رمز جدید یکسان نیست'); return false; }
+            if (p1 === oldPass) { Swal.showValidationMessage('رمز جدید نباید با رمز فعلی یکسان باشد'); return false; }
+
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user?.email) { Swal.showValidationMessage('نشست کاربری معتبر نیست، دوباره وارد شوید.'); return false; }
+
+            const { error: authErr } = await supabaseClient.auth.signInWithPassword({ email: user.email, password: oldPass });
+            if (authErr) { Swal.showValidationMessage('رمز فعلی اشتباه است ❌'); return false; }
+
+            const { error: updateErr } = await supabaseClient.auth.updateUser({ password: p1 });
+            if (updateErr) { Swal.showValidationMessage('تغییر رمز انجام نشد: ' + updateErr.message); return false; }
+            return true;
+        }
+    });
+    if (res.isConfirmed) {
+        Swal.fire({ title: 'رمز عبور تغییر کرد ✅', icon: 'success', timer: 1600, showConfirmButton: false, customClass: { popup: 'rounded-[2.5rem]' } });
+    }
+};
+
+/************************************************
+ * باز/بسته‌کردن دسته‌های همبرگر منو (آکاردئون)
+ ************************************************/
+window.toggleDrawerSection = function (id) {
+    const el = document.getElementById(id);
+    const chev = document.getElementById('chev-' + id);
+    if (!el) return;
+    el.classList.toggle('hidden');
+    if (chev) chev.classList.toggle('rotate-180');
+};
+
+/************************************************
  * گزارش مشکل / پیشنهاد — مدیر می‌تونه از همبرگر منو ثبت کنه
  ************************************************/
 window.openReportIssueModal = async function() {
@@ -1098,6 +1208,75 @@ window.openReportIssueModal = async function() {
 
     } catch (e) {
         Swal.fire({ title: 'خطا در ارسال', text: e.message, icon: 'error' });
+    }
+};
+
+/************************************************
+ * پاسخ ستاد (سوپر ادمین) به گزارش‌های خودِ این مدیر — نوتیفیکیشن در همبرگر منو
+ ************************************************/
+async function refreshReplyNotifBadge() {
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) return;
+        const { count, error } = await supabaseClient
+            .from('feedback_reports')
+            .select('id', { count: 'exact', head: true })
+            .eq('member_id', user.id)
+            .eq('reply_seen_by_manager', false)
+            .not('reply_message', 'is', null);
+        if (error) return;
+        const n = Number(count || 0);
+        [document.getElementById('reply-notif-badge'), document.getElementById('reply-notif-badge-menu')].forEach(el => {
+            if (!el) return;
+            if (n > 0) { el.textContent = n.toLocaleString('fa-IR'); el.classList.remove('hidden'); }
+            else { el.classList.add('hidden'); }
+        });
+    } catch (_) {}
+}
+
+window.openMyFeedbackReports = async function () {
+    Swal.fire({ title: 'در حال بارگذاری...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const { data: rows, error } = await supabaseClient
+            .from('feedback_reports')
+            .select('id,report_type,message,reply_message,replied_at,created_at,reply_seen_by_manager')
+            .eq('member_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(100);
+        if (error) throw error;
+
+        const fmt = (v) => v ? new Date(v).toLocaleString('fa-IR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+        const html = !rows || !rows.length
+            ? '<p style="font-size:11px;color:#64748b;padding:20px 0">هنوز گزارشی ثبت نکرده‌اید.</p>'
+            : `<div style="text-align:right;max-height:60vh;overflow-y:auto;padding:4px">` + rows.map(r => `
+                <div style="border:1px solid #e8ebf0;border-radius:16px;padding:12px;margin-bottom:10px;background:#f9fbfd">
+                    <div style="font-size:9px;color:#94a3b8;font-weight:800;margin-bottom:4px">${r.report_type === 'idea' ? '💡 پیشنهاد' : '🐞 باگ'} • ${fmt(r.created_at)}</div>
+                    <div style="font-size:11px;line-height:2;color:#1e293b;white-space:pre-wrap">${(r.message || '').replace(/</g,'&lt;')}</div>
+                    ${r.reply_message ? `
+                        <div style="margin-top:8px;padding:10px;border-radius:12px;background:#ecfdf3;border:1px solid #b7ecc9">
+                            <div style="font-size:8px;font-weight:900;color:#067647;margin-bottom:3px">پاسخ ستاد • ${fmt(r.replied_at)}</div>
+                            <div style="font-size:10px;line-height:1.9;color:#166534;white-space:pre-wrap">${(r.reply_message || '').replace(/</g,'&lt;')}</div>
+                        </div>` : `<div style="margin-top:8px;font-size:9px;color:#94a3b8;font-weight:700">در انتظار بررسی...</div>`}
+                </div>`).join('') + `</div>`;
+
+        await Swal.fire({
+            title: 'گزارش‌های من و پاسخ ستاد',
+            html,
+            confirmButtonText: 'باشه',
+            confirmButtonColor: '#4f46e5',
+            customClass: { popup: 'rounded-[2.5rem]' },
+            width: 480
+        });
+
+        const unseenIds = (rows || []).filter(r => r.reply_message && r.reply_seen_by_manager === false).map(r => r.id);
+        for (const id of unseenIds) {
+            await supabaseClient.rpc('mark_feedback_reply_seen', { report_id_param: id });
+        }
+        if (unseenIds.length) refreshReplyNotifBadge();
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
     }
 };
 
@@ -1273,6 +1452,65 @@ function updateAccordionDot(dotId, count) {
 }
 
 /************************************************
+ * تاریخ شمسی: روز جاری و شروع ماه شمسی (به وقت تهران)
+ * قبلاً از new Date().getDate() (روز میلادی) استفاده می‌شد؛ مثلاً ۲ مهر = ۲۴ سپتامبر بود و مهلت «تا پنجم» اشتباه بسته می‌شد.
+ ************************************************/
+function getPersianMonthInfo(date) {
+    const now = date || new Date();
+    try {
+        const readParts = (locale) => {
+            const o = {};
+            new Intl.DateTimeFormat(locale, { timeZone: 'Asia/Tehran', year: 'numeric', month: 'numeric', day: 'numeric' })
+                .formatToParts(now).forEach(p => { if (p.type !== 'literal') o[p.type] = Number(p.value); });
+            return o;
+        };
+        const pj = readParts('fa-IR-u-nu-latn-ca-persian');
+        const gr = readParts('en-US');
+        if (!pj.day || !gr.day) throw new Error('Intl persian calendar unsupported');
+
+        // نیمه‌شب تهران (ایران ساعت تابستانی ندارد: UTC+3:30) منهای (روز-۱) روز = شروع ماه شمسی
+        const tehranMidnight = Date.UTC(gr.year, gr.month - 1, gr.day) - (3.5 * 3600 * 1000);
+        const monthStart = new Date(tehranMidnight - (pj.day - 1) * 86400000);
+        return { year: pj.year, month: pj.month, day: pj.day, monthStartISO: monthStart.toISOString() };
+    } catch (e) {
+        console.warn('getPersianMonthInfo fallback (میلادی):', e);
+        return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate(),
+                 monthStartISO: new Date(now.getFullYear(), now.getMonth(), 1).toISOString() };
+    }
+}
+
+/************************************************
+ * تایید هویت مدیر با رمز ورود به پنل (همان الگوی ریست صندوق)
+ ************************************************/
+async function confirmAdminPassword(text) {
+    const step = await Swal.fire({
+        title: 'تایید هویت',
+        input: 'password',
+        inputPlaceholder: 'رمز عبور ورود به پنل مدیر',
+        text: text || 'برای ادامه، رمز عبور اکانت خودتون رو وارد کنید',
+        confirmButtonText: 'تایید',
+        cancelButtonText: 'انصراف',
+        showCancelButton: true,
+        confirmButtonColor: '#4f46e5',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+    if (!step.isConfirmed || !step.value) return false;
+
+    Swal.fire({ title: 'در حال تایید رمز عبور...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+    try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user?.email) throw new Error('نشست کاربری معتبر نیست، دوباره وارد شوید.');
+        const { error: authErr } = await supabaseClient.auth.signInWithPassword({ email: user.email, password: step.value });
+        if (authErr) throw new Error('رمز عبور اشتباه است ❌');
+        Swal.close();
+        return true;
+    } catch (e) {
+        await Swal.fire({ title: 'تایید نشد', text: e.message, icon: 'error', confirmButtonColor: '#4f46e5', customClass: { popup: 'rounded-[2.5rem]' } });
+        return false;
+    }
+}
+
+/************************************************
  * بنر هشدار پلکانی برای وام نوبتی پرداخت‌نشده (روز ۲ تا ۵ ماه)
  ************************************************/
 async function checkMonthlyLoanWarning(poolId) {
@@ -1280,13 +1518,13 @@ async function checkMonthlyLoanWarning(poolId) {
     const textEl = document.getElementById('monthly-loan-warning-text');
     if (!banner || !textEl || !poolId) return;
 
-    const today = new Date();
-    const dayOfMonth = today.getDate();
+    const persianNow = getPersianMonthInfo();
+    const dayOfMonth = persianNow.day;
 
     if (dayOfMonth < 2) { banner.classList.add('hidden'); return; }
 
     try {
-        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+        const firstDayOfMonth = persianNow.monthStartISO;
         const { data: paidThisMonth } = await supabaseClient
             .from('transactions')
             .select('id')
@@ -1322,6 +1560,15 @@ async function checkMonthlyLoanWarning(poolId) {
 }
 
 /************************************************
+ * قانون واحد «حضور در صف وام نوبتی»: بدهی نوبتی نداشته باشد و تاریخ صلاحیت (eligible_at) داشته باشد.
+ * تب تسک‌ها، صف اولیه و کارت تب هوم همه باید از همین قانون استفاده کنند؛
+ * بعد از پرداخت وام، eligible_at خالی (null) می‌شود و عضو از صف خارج می‌شود.
+ ************************************************/
+function isLoanQueueEligible(member, monthlyDebt) {
+    return monthlyDebt <= 0 && member.eligible_at !== null;
+}
+
+/************************************************
  * پیش‌نمایش سریع صندوق‌ها در تب هوم (کلیک روی کارت)
  ************************************************/
 async function loadLoanFundQuickview() {
@@ -1335,11 +1582,12 @@ async function loadLoanFundQuickview() {
         const { data: txs } = await supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved');
 
         const queue = (members || []).map(m => {
-            const userIn = txs.filter(t => t.member_id === m.id && t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
-            const userOutMonthly = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
-            return { ...m, isEligible: (userOutMonthly - userIn) <= 0 };
+            const userIn = (txs || []).filter(t => t.member_id === m.id && t.type === 'in' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
+            const userOutMonthly = (txs || []).filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
+            const monthlyDebt = Math.max(0, userOutMonthly - userIn);
+            return { ...m, isEligible: isLoanQueueEligible(m, monthlyDebt) };
         }).filter(m => m.isEligible)
-          .sort((a, b) => new Date(a.eligible_at || 0) - new Date(b.eligible_at || 0));
+          .sort((a, b) => new Date(a.eligible_at) - new Date(b.eligible_at));
 
         if (queue.length === 0) {
             el.innerHTML = '<p class="text-slate-400 text-[10px]">فعلاً کسی واجد شرایط دریافت وام نیست.</p>';
@@ -1484,12 +1732,52 @@ function renderTransactionLog() {
 window.decideCoinRequest = async function(requestId, approve) {
     const poolId = sessionStorage.getItem('pool_id');
     try {
+        let dueDate = null;
+
+        if (approve) {
+            // مهلت بازپرداخت رو از مدیر می‌پرسیم (مدل توافق‌شده: بدون قسط ثابت، فقط سررسید)
+            const dueResult = await Swal.fire({
+                title: 'مهلت بازپرداخت؟',
+                input: 'select',
+                inputOptions: { '30': '۳۰ روز', '60': '۶۰ روز', '90': '۹۰ روز', 'custom': 'تاریخ دلخواه' },
+                inputValue: '60',
+                showCancelButton: true,
+                confirmButtonText: 'تایید و واریز',
+                cancelButtonText: 'انصراف',
+                customClass: { popup: 'rounded-[2.5rem]' }
+            });
+            if (!dueResult.isConfirmed) return;
+
+            if (dueResult.value === 'custom') {
+                const dateResult = await Swal.fire({
+                    title: 'تاریخ سررسید را وارد کنید',
+                    input: 'date',
+                    inputValue: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10),
+                    showCancelButton: true,
+                    confirmButtonText: 'تایید',
+                    cancelButtonText: 'انصراف'
+                });
+                if (!dateResult.isConfirmed || !dateResult.value) return;
+                dueDate = new Date(dateResult.value).toISOString();
+            } else {
+                dueDate = new Date(Date.now() + Number(dueResult.value) * 86400000).toISOString();
+            }
+        }
+
         const { data: ok, error } = await supabaseClient.rpc('decide_coin_request', {
             request_id: Number(requestId),
             approve: approve
         });
         if (error) throw error;
         if (!ok) throw new Error('این درخواست دیگر معتبر نیست یا اجازه‌ی دسترسی ندارید');
+
+        // ثبت سررسید جدید برای عضو (هر مساعده‌ی سکه‌ای تازه، سررسید رو روی مانده‌ی جدید تنظیم می‌کنه)
+        if (approve && dueDate) {
+            const { data: reqRow } = await supabaseClient.from('coin_requests').select('member_id').eq('id', requestId).maybeSingle();
+            if (reqRow?.member_id) {
+                await supabaseClient.from('members').update({ coin_assistance_due_date: dueDate }).eq('id', reqRow.member_id);
+            }
+        }
 
         Swal.fire({
             title: approve ? 'مساعده واریز شد ✅' : 'درخواست رد شد',
@@ -2180,7 +2468,7 @@ async function deleteProject(id, name) {
 
             if (error) throw error;
 
-            // ۴. نمایش پیام موفقیت و رفرش صفحه
+            // ۴. نمایش پیام موفقیت و رفرش لیست پروژه‌ها (بدون لود کامل صفحه)
             await Swal.fire({
                 title: 'عملیات موفق',
                 text: `پروژه "${name}" با موفقیت حذف گردید 🗑️`,
@@ -2190,7 +2478,8 @@ async function deleteProject(id, name) {
                 customClass: { popup: 'rounded-[2rem]' }
             });
 
-            location.reload();
+            if (typeof loadAdminProjects === 'function') loadAdminProjects(sessionStorage.getItem('pool_id'));
+            if (typeof calculateStats === 'function') calculateStats(sessionStorage.getItem('pool_id'));
 
         } catch (e) {
             // نمایش خطا اگر مشکلی پیش آمد
@@ -2320,7 +2609,7 @@ window.submitBlockedPayment = async function(poolId) {
         const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
 
         const { error: dbErr } = await supabaseClient.from('sub_requests').insert([{
-            pool_id: poolId, amount: Number(amt), receipt_url: urlData.publicUrl, status: 'pending'
+            pool_id: poolId, amount: Number(amt), receipt_url: urlData.publicUrl, status: 'pending', request_type: 'subscription'
         }]);
         if (dbErr) throw dbErr;
 
@@ -2528,7 +2817,8 @@ window.submitRenewalRequest = async function() {
             pool_id: poolId,
             amount: Number(amtInput.value),
             receipt_url: urlData.publicUrl,
-            status: 'pending'
+            status: 'pending',
+            request_type: 'subscription'
         }]);
 
         if (error) throw error;
@@ -2911,7 +3201,8 @@ if (!result.isConfirmed) return;
         if (error) throw error;
 
         alert("درخواست رد شد ❌");
-        location.reload();
+        if (typeof loadAdminLoans === 'function') loadAdminLoans(sessionStorage.getItem('pool_id'));
+        if (typeof loadOpsTabContent === 'function') loadOpsTabContent(sessionStorage.getItem('pool_id'));
     } catch (e) {
         alert("خطا در عملیات رد درخواست");
     }
@@ -3321,15 +3612,16 @@ async function updateProfileFinancials(memberId) {
         // ۱. دریافت تمام تراکنش‌های تایید شده ورودی برای این عضو (UUID)
         const { data: txs, error } = await supabaseClient
             .from('transactions')
-            .select('amount')
+            .select('amount, category')
             .eq('member_id', memberId)
             .eq('status', 'approved')
             .eq('type', 'in');
 
         if (error) throw error;
 
-        // ۲. محاسبه مجموع واریزی‌ها
+        // ۲. محاسبه مجموع واریزی‌ها (کل واریزی، هر دسته‌ای) و مجموع واریزیِ مربوط به سقف بدهی (فقط وام ماهانه + مساعده)
         const totalIn = txs ? txs.reduce((sum, t) => sum + Number(t.amount), 0) : 0;
+        const totalInForDebt = txs ? txs.filter(t => t.category === 'monthly' || t.category === 'emergency').reduce((sum, t) => sum + Number(t.amount), 0) : 0;
 
         // ۳. پیدا کردن سقف بدهی عضو از متغیر سراسری
         const member = allMembersData.find(x => String(x.id) === String(memberId));
@@ -3338,8 +3630,8 @@ async function updateProfileFinancials(memberId) {
         // ۴. نمایش مبالغ در پروفایل
         totalInEl.innerText = totalIn.toLocaleString() + ' ت';
         
-        // محاسبه مانده بدهی (سقف بدهی منهای واریزی‌ها)
-        const remainingDebt = Math.max(0, debtTarget - totalIn);
+        // محاسبه مانده بدهی (سقف بدهی منهای واریزی‌های وام‌ماهانه/مساعده)
+        const remainingDebt = Math.max(0, debtTarget - totalInForDebt);
         debtEl.innerText = remainingDebt.toLocaleString() + ' ت';
 
     } catch (e) {
@@ -3461,7 +3753,7 @@ window.submitQuotaRequest = async function() {
         const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
 
         const { error } = await supabaseClient.from('sub_requests').insert([{
-            pool_id: poolId, amount: amount, receipt_url: urlData.publicUrl, status: 'pending'
+            pool_id: poolId, amount: amount, receipt_url: urlData.publicUrl, status: 'pending', request_type: 'quota'
         }]);
 
         if (error) throw error;
@@ -3531,44 +3823,9 @@ window.showProjectFullAnalysis = function(projectId) {
  * تابع مدیریت و نمایش صف انتظار وام نوبتی
  ************************************************/
 window.loadLoanQueue = async function(poolId) {
-    const container = document.getElementById('loan-queue-list');
-    if (!container || !poolId) return;
-
-    try {
-        const { data: members } = await supabaseClient.from('members').select('*').eq('pool_id', poolId).eq('is_admin', false);
-        const { data: txs } = await supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved');
-
-        const queue = members.map(m => {
-            const userIn = txs.filter(t => t.member_id === m.id && t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
-            const userOutMonthly = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
-            const isEligible = (userOutMonthly - userIn) <= 0;
-            return { ...m, isEligible };
-        });
-
-        // مرتب سازی: اولویت با آماده‌ها و بعد قدیمی‌ترین تاریخ صلاحیت
-        const sorted = queue.sort((a, b) => {
-            if (a.isEligible && !b.isEligible) return -1;
-            if (!a.isEligible && b.isEligible) return 1;
-            return new Date(a.eligible_at || 0) - new Date(b.eligible_at || 0);
-        });
-
-        container.innerHTML = sorted.map((m, idx) => `
-            <div class="bg-white p-5 rounded-[2rem] border border-slate-50 flex justify-between items-center shadow-sm">
-                <div class="flex items-center gap-4">
-                    <span class="w-10 h-10 ${m.isEligible ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'} rounded-2xl flex items-center justify-center font-black text-xs shadow-sm">
-                        ${idx + 1}
-                    </span>
-                    <div class="text-right">
-                        <h5 class="text-xs font-black text-slate-800">${m.full_name}</h5>
-                        <p class="text-[8px] ${m.isEligible ? 'text-emerald-500' : 'text-rose-400'} font-bold mt-0.5">
-                            ${m.isEligible ? '✅ آماده دریافت وام' : '❌ بدهکار (در انتظار تسویه)'}
-                        </p>
-                    </div>
-                </div>
-                ${m.isEligible ? `<button onclick="payStandardLoan('${m.id}', '${m.full_name}')" class="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-[9px] font-black active:scale-95">واریز وام</button>` : ''}
-            </div>
-        `).join('');
-    } catch (e) { console.log(e); }
+    // نسخه‌ی قدیمی این تابع قانون دیگری برای صف داشت (eligible_at را نادیده می‌گرفت) و با loadOpsTabContent
+    // روی همان کادر (#loan-queue-list) می‌نوشت. حالا فقط به پیاده‌سازی واحد وصل است.
+    if (typeof loadOpsTabContent === 'function') return loadOpsTabContent(poolId);
 };
 
 /************************************************
@@ -3599,20 +3856,27 @@ window.payStandardLoan = async function(memberId, memberName) {
 
     if (!amount) return;
 
-    // بلوکه‌کردن پرداخت وام نوبتی بعد از پنجم ماه
-    const dayNow = new Date().getDate();
-    if (dayNow > 5) {
-        return Swal.fire({
+    // بعد از پنجم ماه شمسی: هشدار + تایید مدیر + رمز ورود به پنل (به‌جای بلوکه‌کردن کامل)
+    const persianNow = getPersianMonthInfo();
+    if (persianNow.day > 5) {
+        const late = await Swal.fire({
             title: 'خارج از بازه‌ی مجاز',
-            text: 'پرداخت وام نوبتی فقط تا پنجم هر ماه امکان‌پذیره. برای این ماه دیر شده، ماه بعد اقدام کنید.',
+            html: '<p style="font-size:12px; line-height:2; color:#475467;">پرداخت وام نوبتی فقط تا پنجم هر ماه امکان‌پذیره.<br><b>در هر صورت ادامه می‌دهید؟</b></p>',
             icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'بله، ادامه می‌دهم',
+            cancelButtonText: 'انصراف',
             confirmButtonColor: '#4f46e5',
             customClass: { popup: 'rounded-[2.5rem]' }
         });
+        if (!late.isConfirmed) return;
+
+        const verified = await confirmAdminPassword('پرداخت خارج از بازه‌ی مجاز است. برای تایید، رمز عبور ورود به پنل مدیر را وارد کنید.');
+        if (!verified) return;
     }
 
-    // فقط یک‌بار در ماه: اگه وام نوبتی همین ماه قبلاً پرداخت شده، اجازه‌ی پرداخت دوباره نده
-    const firstDayOfThisMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    // فقط یک‌بار در ماه (ماه شمسی): اگه وام نوبتی همین ماه قبلاً پرداخت شده، اجازه‌ی پرداخت دوباره نده
+    const firstDayOfThisMonth = persianNow.monthStartISO;
     const { data: alreadyPaidThisMonth } = await supabaseClient
         .from('transactions')
         .select('id, members(full_name)')
@@ -3680,6 +3944,8 @@ window.payStandardLoan = async function(memberId, memberName) {
         // رفرش داده‌های صفحه
         if (typeof loadOpsTabContent === 'function') loadOpsTabContent(poolId);
         if (typeof calculateStats === 'function') calculateStats(poolId);
+        if (typeof loadLoanFundQuickview === 'function') loadLoanFundQuickview();
+        if (typeof checkMonthlyLoanWarning === 'function') checkMonthlyLoanWarning(poolId);
 
     } catch (e) {
         Swal.fire({ title: 'خطا در عملیات', text: e.message, icon: 'error' });
@@ -4017,7 +4283,7 @@ window.sendPushToUnpaid = async function() {
         const now = new Date();
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
         const { data: members } = await supabaseClient.from('members').select('id').eq('pool_id', poolId).eq('is_admin', false);
-        const { data: paidUsers } = await supabaseClient.from('transactions').select('member_id').eq('pool_id', poolId).eq('status', 'approved').gte('created_at', firstDay);
+        const { data: paidUsers } = await supabaseClient.from('transactions').select('member_id').eq('pool_id', poolId).eq('status', 'approved').eq('type', 'in').eq('category', 'monthly').gte('created_at', firstDay);
         
         const paidIds = paidUsers.map(p => String(p.member_id));
         const unpaidIds = members.filter(m => !paidIds.includes(String(m.id))).map(m => m.id);
@@ -4072,6 +4338,13 @@ async function loadPendingReceipts(poolId) {
             const date = new Date(t.created_at).toLocaleDateString('fa-IR-u-nu-latn');
             const senderName = t.members ? t.members.full_name : 'عضو ناشناس';
 
+            const catInfo = {
+                monthly: { label: 'قسط ماهانه', cls: 'bg-indigo-50 text-indigo-600' },
+                emergency: { label: 'مساعده', cls: 'bg-amber-50 text-amber-600' },
+                coin_assistance: { label: 'مساعده سکه‌ای', cls: 'bg-yellow-50 text-yellow-600' },
+                charity: { label: 'خیریه', cls: 'bg-emerald-50 text-emerald-600' }
+            }[t.category] || { label: 'نامشخص', cls: 'bg-slate-100 text-slate-500' };
+
             return `
             <div class="receipt-card mb-4 shadow-sm" onclick="this.classList.toggle('active')">
                 <div class="receipt-actions-overlay">
@@ -4086,7 +4359,7 @@ async function loadPendingReceipts(poolId) {
                     </div>
                     <div class="text-right">
                         <h5 class="text-xs font-[900] text-slate-800">${senderName}</h5>
-                        <p class="text-[7px] text-slate-400 mt-1 uppercase font-bold italic">Tap to verify</p>
+                        <span class="inline-block mt-1 text-[7px] font-black px-2 py-0.5 rounded-full ${catInfo.cls}">${catInfo.label}</span>
                     </div>
                 </div>
             </div>`;
@@ -4222,6 +4495,21 @@ async function loadAllMembers(poolId) {
     }
 }
 
+// نمایش سررسید و مبلغ پیشنهادی ماهانه برای مساعده/مساعده‌سکه‌ای (مدل توافق‌شده: بدون قسط ثابت اجباری)
+function formatDueInfo(dueDateStr, debtAmount) {
+    if (!dueDateStr || debtAmount <= 0) return '';
+    const due = new Date(dueDateStr);
+    const now = new Date();
+    const daysLeft = Math.ceil((due - now) / 86400000);
+
+    if (daysLeft < 0) {
+        return `<p class="text-[7px] text-rose-600 font-black mt-1">⚠️ ${Math.abs(daysLeft)} روز معوقه</p>`;
+    }
+    const monthsLeft = Math.max(1, Math.ceil(daysLeft / 30));
+    const suggested = Math.round(debtAmount / monthsLeft);
+    return `<p class="text-[7px] text-slate-500 font-bold mt-1">${daysLeft} روز مونده<br>پیشنهاد: ${suggested.toLocaleString()}/ماه</p>`;
+}
+
 /************************************************
  * تابع جامع لود عملیات (با قفل هوشمند نوبت)
  ************************************************/
@@ -4242,20 +4530,23 @@ window.loadOpsTabContent = async function(poolId) {
 
         // ۲. محاسبات مالی تک‌تک اعضا
         const processed = members.map(m => {
-            // کل واریزی (قسط)
-            const totalIn = txs.filter(t => t.member_id === m.id && t.type === 'in').reduce((s, a) => s + Number(a.amount), 0);
-            // کل دریافتی نوبتی
-            const totalOutMonthly = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
-            // کل دریافتی مساعده
-            const totalOutEmergency = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'emergency').reduce((s, a) => s + Number(a.amount), 0);
+            const memberTxs = txs.filter(t => t.member_id === m.id);
+            const sumBy = (type, cat) => memberTxs.filter(t => t.type === type && t.category === cat).reduce((s, a) => s + Number(a.amount), 0);
 
-            const monthlyDebt = Math.max(0, totalOutMonthly - totalIn);
-            const emergencyDebt = totalOutEmergency; // بدهی مساعده
+            // کل دریافتی نوبتی / کل واریزیِ همون قسط ماهانه
+            const totalOutMonthly = sumBy('out', 'monthly');
+            const monthlyDebt = Math.max(0, totalOutMonthly - sumBy('in', 'monthly'));
+
+            // مساعده: دریافتی منهای بازپرداختی همون دسته
+            const emergencyDebt = Math.max(0, sumBy('out', 'emergency') - sumBy('in', 'emergency'));
+
+            // مساعده‌ی تبدیل سکه: دریافتی منهای بازپرداختی همون دسته
+            const coinAssistDebt = Math.max(0, sumBy('out', 'coin_assistance') - sumBy('in', 'coin_assistance'));
 
             // شرط حضور در صف: بدهی نوبتی نداشته باشد و تاریخ صلاحیت داشته باشد ✅
-            const isEligible = monthlyDebt <= 0 && m.eligible_at !== null;
+            const isEligible = isLoanQueueEligible(m, monthlyDebt);
 
-            return { ...m, monthlyDebt, emergencyDebt, isEligible };
+            return { ...m, monthlyDebt, emergencyDebt, coinAssistDebt, isEligible };
         });
 
         // ۳. مدیریت کرکره "صف نوبت" (با دکمه قفل شونده) 👇
@@ -4284,10 +4575,10 @@ window.loadOpsTabContent = async function(poolId) {
         }).join('') : '<p class="text-center py-6 text-slate-300 text-[9px]">کسی در صف انتظار نیست.</p>';
 
         // ۴. مدیریت کرکره "لیست بدهکاران" 👇
-        const debtorList = processed.filter(m => m.monthlyDebt > 0 || m.emergencyDebt > 0);
+        const debtorList = processed.filter(m => m.monthlyDebt > 0 || m.emergencyDebt > 0 || m.coinAssistDebt > 0);
         
         debtorsContainer.innerHTML = debtorList.length > 0 ? debtorList.map(m => {
-            const totalDebt = m.monthlyDebt + m.emergencyDebt;
+            const totalDebt = m.monthlyDebt + m.emergencyDebt + m.coinAssistDebt;
             return `
             <div class="bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm mb-4">
                 <div class="flex justify-between items-start mb-4">
@@ -4297,9 +4588,10 @@ window.loadOpsTabContent = async function(poolId) {
                     </div>
                     <span class="bg-rose-500 text-white text-[10px] font-black px-3 py-1 rounded-xl">${totalDebt.toLocaleString()} ت</span>
                 </div>
-                <div class="grid grid-cols-2 gap-2">
+                <div class="grid grid-cols-3 gap-2">
                     ${m.monthlyDebt > 0 ? `<div class="bg-indigo-50 p-2 rounded-xl text-center border border-indigo-100"><p class="text-[7px] text-indigo-500 font-black">وام نوبتی</p><p class="text-[9px] font-black text-indigo-800">${m.monthlyDebt.toLocaleString()}</p></div>` : '<div class="bg-slate-50 opacity-20 rounded-xl flex items-center justify-center"><i class="fas fa-check text-[8px]"></i></div>'}
-                    ${m.emergencyDebt > 0 ? `<div class="bg-amber-50 p-2 rounded-xl text-center border border-amber-100"><p class="text-[7px] text-amber-600 font-black">مساعده</p><p class="text-[9px] font-black text-amber-800">${m.emergencyDebt.toLocaleString()}</p></div>` : '<div class="bg-slate-50 opacity-20 rounded-xl flex items-center justify-center"><i class="fas fa-check text-[8px]"></i></div>'}
+                    ${m.emergencyDebt > 0 ? `<div class="bg-amber-50 p-2 rounded-xl text-center border border-amber-100"><p class="text-[7px] text-amber-600 font-black">مساعده</p><p class="text-[9px] font-black text-amber-800">${m.emergencyDebt.toLocaleString()}</p>${formatDueInfo(m.emergency_due_date, m.emergencyDebt)}</div>` : '<div class="bg-slate-50 opacity-20 rounded-xl flex items-center justify-center"><i class="fas fa-check text-[8px]"></i></div>'}
+                    ${m.coinAssistDebt > 0 ? `<div class="bg-yellow-50 p-2 rounded-xl text-center border border-yellow-100"><p class="text-[7px] text-yellow-600 font-black">مساعده سکه‌ای</p><p class="text-[9px] font-black text-yellow-800">${m.coinAssistDebt.toLocaleString()}</p>${formatDueInfo(m.coin_assistance_due_date, m.coinAssistDebt)}</div>` : '<div class="bg-slate-50 opacity-20 rounded-xl flex items-center justify-center"><i class="fas fa-check text-[8px]"></i></div>'}
                 </div>
             </div>`;
         }).join('') : '<p class="text-center py-8 text-emerald-500 text-[9px] font-black italic">بدهکاری در سیستم نیست ✨</p>';
@@ -4325,52 +4617,82 @@ window.payEmergencyLoan = async function(loanId, amount, memberName, memberId) {
         customClass: { popup: 'rounded-[2.5rem]' }
     });
 
-    if (result.isConfirmed) {
-        // چک موجودی صندوق اصلی قبل از هر برداشتی
-        const balances = await getCurrentFundBalances(poolId);
-        if (Number(amount) > balances.mainFund) {
-            return insufficientFundsAlert('صندوق اصلی', amount, balances.mainFund);
-        }
+    if (!result.isConfirmed) return;
 
-        try {
-            Swal.fire({ title: 'در حال کسر از موجودی...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+    // مهلت بازپرداخت رو از مدیر می‌پرسیم (مدل توافق‌شده: بدون قسط ثابت، فقط سررسید)
+    const dueResult = await Swal.fire({
+        title: 'مهلت بازپرداخت؟',
+        input: 'select',
+        inputOptions: { '30': '۳۰ روز', '60': '۶۰ روز', '90': '۹۰ روز', 'custom': 'تاریخ دلخواه' },
+        inputValue: '60',
+        showCancelButton: true,
+        confirmButtonText: 'تایید',
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem]' }
+    });
+    if (!dueResult.isConfirmed) return;
 
-            // ۱. ثبت تراکنش خروجی (Category: emergency)
-            const { error: txErr } = await supabaseClient.from('transactions').insert([{
-                pool_id: poolId,
-                member_id: memberId,
-                amount: Number(amount),
-                status: 'approved',
-                type: 'out',
-                category: 'emergency', // دسته‌بندی مساعده فوری
-                receipt_url: `مساعده: ${memberName}`
-            }]);
+    let dueDate;
+    if (dueResult.value === 'custom') {
+        const dateResult = await Swal.fire({
+            title: 'تاریخ سررسید را وارد کنید',
+            input: 'date',
+            inputValue: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10),
+            showCancelButton: true,
+            confirmButtonText: 'تایید',
+            cancelButtonText: 'انصراف'
+        });
+        if (!dateResult.isConfirmed || !dateResult.value) return;
+        dueDate = new Date(dateResult.value).toISOString();
+    } else {
+        dueDate = new Date(Date.now() + Number(dueResult.value) * 86400000).toISOString();
+    }
 
-            if (txErr) throw txErr;
+    // چک موجودی صندوق اصلی قبل از هر برداشتی
+    const balances = await getCurrentFundBalances(poolId);
+    if (Number(amount) > balances.mainFund) {
+        return insufficientFundsAlert('صندوق اصلی', amount, balances.mainFund);
+    }
 
-            // ۲. تغییر وضعیت درخواست در جدول وام‌ها
-            const { error: loanErr } = await supabaseClient.from('loans').update({ status: 'paid' }).eq('id', loanId);
-            if (loanErr) throw loanErr;
+    try {
+        Swal.fire({ title: 'در حال کسر از موجودی...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
-            // ۳. افزایش بدهی عضو (بر اساس ID) 👇
-            const { data: mData } = await supabaseClient.from('members').select('debt_target').eq('id', memberId).single();
-            
-            await supabaseClient.from('members').update({
-                debt_target: (Number(mData?.debt_target) || 0) + Number(amount)
-            }).eq('id', memberId);
+        // ۱. ثبت تراکنش خروجی (Category: emergency)
+        const { error: txErr } = await supabaseClient.from('transactions').insert([{
+            pool_id: poolId,
+            member_id: memberId,
+            amount: Number(amount),
+            status: 'approved',
+            type: 'out',
+            category: 'emergency', // دسته‌بندی مساعده فوری
+            receipt_url: `مساعده: ${memberName}`
+        }]);
 
-            await Swal.fire({ title: 'پرداخت شد ✅', text: 'مبلغ مساعده از موجودی صندوق کسر و در بدهی عضو ثبت شد.', icon: 'success' });
-            
-            // رفرش لیست‌ها
-            if (typeof loadAdminLoans === 'function') loadAdminLoans(poolId);
-            if (typeof loadCoinRequests === 'function') loadCoinRequests(poolId);
-            if (typeof loadTransactionLog === 'function') loadTransactionLog(poolId);
-            if (typeof loadOpsTabContent === 'function') loadOpsTabContent(poolId);
-            if (typeof calculateStats === 'function') calculateStats(poolId);
+        if (txErr) throw txErr;
 
-        } catch (e) {
-            Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
-        }
+        // ۲. تغییر وضعیت درخواست در جدول وام‌ها
+        const { error: loanErr } = await supabaseClient.from('loans').update({ status: 'paid' }).eq('id', loanId);
+        if (loanErr) throw loanErr;
+
+        // ۳. افزایش بدهی عضو + ثبت سررسید جدید (هر مساعده‌ی تازه، سررسید رو روی مانده‌ی جدید تنظیم می‌کنه) 👇
+        const { data: mData } = await supabaseClient.from('members').select('debt_target').eq('id', memberId).single();
+
+        await supabaseClient.from('members').update({
+            debt_target: (Number(mData?.debt_target) || 0) + Number(amount),
+            emergency_due_date: dueDate
+        }).eq('id', memberId);
+
+        await Swal.fire({ title: 'پرداخت شد ✅', text: 'مبلغ مساعده از موجودی صندوق کسر و در بدهی عضو ثبت شد.', icon: 'success' });
+        
+        // رفرش لیست‌ها
+        if (typeof loadAdminLoans === 'function') loadAdminLoans(poolId);
+        if (typeof loadCoinRequests === 'function') loadCoinRequests(poolId);
+        if (typeof loadTransactionLog === 'function') loadTransactionLog(poolId);
+        if (typeof loadOpsTabContent === 'function') loadOpsTabContent(poolId);
+        if (typeof calculateStats === 'function') calculateStats(poolId);
+
+    } catch (e) {
+        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
     }
 };
 
@@ -4394,10 +4716,281 @@ async function loadPoolHeaderInfo(poolId) {
             const dateEl = document.getElementById('display-init-date');
             if (dateEl) {
                 const date = new Date(pool.created_at);
-                dateEl.innerText = date.toLocaleDateString('fa-IR');
+                dateEl.innerText = date.toLocaleDateString('fa-IR-u-nu-latn');
             }
         }
     } catch (e) {
         console.log("Pool Header Error:", e.message);
     }
 }
+
+// ==================================================
+// چت گروهی صندوق (پنل مدیر)
+// ==================================================
+let chatChannel = null;
+let chatSelectedImageFile = null;
+let chatPoolNameCache = null;
+
+function renderChatMessage(msg, myId) {
+    const isMine = String(msg.sender_id) === String(myId);
+    const sender = msg.members || {};
+    const time = new Date(msg.created_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+    const avatarHtml = sender.avatar_url
+        ? `<img src="${sender.avatar_url}" class="chat-avatar">`
+        : `<div class="chat-avatar flex items-center justify-center text-slate-400"><i class="fas fa-user text-[11px]"></i></div>`;
+
+    const senderNameHtml = !isMine
+        ? `<p class="chat-sender-name">${sender.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : ''}${sender.full_name || 'عضو'}</p>`
+        : '';
+
+    const imageHtml = msg.image_url ? `<img src="${msg.image_url}" onclick="window.open('${msg.image_url}','_blank')">` : '';
+    const textHtml = msg.text ? `<p>${msg.text.replace(/</g, '&lt;')}</p>` : '';
+
+    // دکمه‌ی حذف: فقط چون این پنل مدیره، رو همه‌ی پیام‌ها نمایش داده میشه
+    const deleteBtn = `<button onclick="deleteChatMessage(${msg.id}, this)" class="chat-delete-btn"><i class="fas fa-times"></i></button>`;
+
+    return `
+        <div id="chat-msg-row-${msg.id}" class="chat-row ${isMine ? 'mine' : ''}">
+            ${avatarHtml}
+            <div class="chat-bubble">
+                ${deleteBtn}
+                ${senderNameHtml}
+                ${textHtml}
+                ${imageHtml}
+                <span class="chat-time">${time}</span>
+            </div>
+        </div>`;
+}
+
+/************************************************
+ * نقطه‌ی قرمز پیام خوانده‌نشده روی دکمه‌ی شناور چت گروهی
+ * زمان «آخرین باز کردن چت» در localStorage نگه‌داشته می‌شود (به‌ازای هر بانک)
+ ************************************************/
+let chatNotifyChannel = null;
+
+function chatLastReadKey(poolId) { return 'chat_last_read_' + poolId; }
+
+function setChatUnreadDot(show) {
+    const dot = document.getElementById('chat-unread-dot');
+    if (dot) dot.classList.toggle('hidden', !show);
+}
+
+function markChatRead() {
+    const poolId = sessionStorage.getItem('pool_id');
+    if (poolId) localStorage.setItem(chatLastReadKey(poolId), new Date().toISOString());
+    setChatUnreadDot(false);
+}
+
+async function refreshChatUnreadDot() {
+    try {
+        const poolId = sessionStorage.getItem('pool_id');
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!poolId || !user) return;
+
+        const lastRead = localStorage.getItem(chatLastReadKey(poolId));
+        if (!lastRead) { // اولین بار: پیام‌های قدیمی را «خوانده‌نشده» حساب نکن
+            localStorage.setItem(chatLastReadKey(poolId), new Date().toISOString());
+            return;
+        }
+        const { count, error } = await supabaseClient
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('pool_id', poolId)
+            .neq('sender_id', user.id)
+            .gt('created_at', lastRead);
+        if (error) return;
+        setChatUnreadDot(Number(count || 0) > 0);
+    } catch (_) {}
+}
+
+async function initChatUnreadWatcher() {
+    const poolId = sessionStorage.getItem('pool_id');
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!poolId || !user) return;
+
+    await refreshChatUnreadDot();
+
+    if (chatNotifyChannel) supabaseClient.removeChannel(chatNotifyChannel);
+    chatNotifyChannel = supabaseClient
+        .channel('chat-notify-' + poolId)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `pool_id=eq.${poolId}` }, (payload) => {
+            if (payload.new.sender_id === user.id) return;
+            const chatOpen = !document.getElementById('group-chat-modal')?.classList.contains('hidden');
+            if (chatOpen) markChatRead(); else setChatUnreadDot(true);
+        })
+        .subscribe();
+}
+
+window.openGroupChat = async function() {
+    const modal = document.getElementById('group-chat-modal');
+    const listEl = document.getElementById('chat-messages-list');
+    if (!modal || !listEl) return;
+
+    modal.classList.remove('hidden');
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    const userId = user?.id;
+    const poolId = sessionStorage.getItem('pool_id');
+    if (!userId || !poolId) return;
+    markChatRead();
+
+    if (!chatPoolNameCache) {
+        const { data: pool } = await supabaseClient.from('pools').select('pool_name').eq('id', poolId).maybeSingle();
+        chatPoolNameCache = pool?.pool_name || 'صندوق';
+    }
+    document.getElementById('chat-room-title').innerText = chatPoolNameCache;
+
+    const { data: msgs, error } = await supabaseClient
+        .from('messages')
+        .select('*, members!sender_id(full_name, is_admin, avatar_url)')
+        .eq('pool_id', poolId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+    if (error) {
+        console.error('❌ خطا در دریافت پیام‌ها:', error);
+        listEl.innerHTML = '<p class="text-center text-[10px] text-rose-400 font-bold py-10">خطا در بارگذاری پیام‌ها</p>';
+        return;
+    }
+
+    const ordered = (msgs || []).slice().reverse();
+    listEl.innerHTML = ordered.length
+        ? ordered.map(m => renderChatMessage(m, userId)).join('')
+        : '<p class="text-center text-[10px] text-slate-300 font-bold py-10">هنوز پیامی ارسال نشده</p>';
+    listEl.scrollTop = listEl.scrollHeight;
+
+    if (chatChannel) supabaseClient.removeChannel(chatChannel);
+    chatChannel = supabaseClient
+        .channel('chat-admin-' + poolId)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `pool_id=eq.${poolId}` }, async (payload) => {
+            const { data: sender } = await supabaseClient.from('members').select('full_name, is_admin, avatar_url').eq('id', payload.new.sender_id).maybeSingle();
+            const fullMsg = { ...payload.new, members: sender };
+            const emptyState = listEl.querySelector('.text-center');
+            if (emptyState) emptyState.remove();
+            listEl.insertAdjacentHTML('beforeend', renderChatMessage(fullMsg, userId));
+            listEl.scrollTop = listEl.scrollHeight;
+        })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages', filter: `pool_id=eq.${poolId}` }, (payload) => {
+            document.getElementById('chat-msg-row-' + payload.old.id)?.remove();
+        })
+        .subscribe();
+};
+
+window.closeGroupChat = function() {
+    document.getElementById('group-chat-modal')?.classList.add('hidden');
+    markChatRead();
+    if (chatChannel) {
+        supabaseClient.removeChannel(chatChannel);
+        chatChannel = null;
+    }
+    clearChatImage();
+};
+
+window.deleteChatMessage = async function(msgId, btnEl) {
+    const result = await Swal.fire({
+        title: 'حذف این پیام؟',
+        text: 'این کار برای همه‌ی اعضا برگشت‌ناپذیره.',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'حذف کن',
+        confirmButtonColor: '#f43f5e',
+        cancelButtonText: 'انصراف'
+    });
+    if (!result.isConfirmed) return;
+
+    const { error } = await supabaseClient.from('messages').delete().eq('id', msgId);
+    if (error) {
+        console.error('❌ خطا در حذف پیام:', error);
+        return Swal.fire({ text: 'حذف پیام ناموفق بود', icon: 'error' });
+    }
+    btnEl.closest('.chat-row')?.remove();
+};
+
+window.handleChatImageSelect = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    chatSelectedImageFile = file;
+    const preview = document.getElementById('chat-image-preview');
+    preview.src = URL.createObjectURL(file);
+    document.getElementById('chat-image-preview-wrap').classList.remove('hidden');
+};
+
+window.clearChatImage = function() {
+    chatSelectedImageFile = null;
+    document.getElementById('chat-image-input').value = '';
+    document.getElementById('chat-image-preview-wrap').classList.add('hidden');
+};
+
+window.sendChatMessage = async function() {
+    const textInput = document.getElementById('chat-text-input');
+    const text = textInput.value.trim();
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    const userId = user?.id;
+    const poolId = sessionStorage.getItem('pool_id');
+
+    if (!text && !chatSelectedImageFile) return;
+
+    const btn = document.getElementById('chat-send-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i>';
+
+    try {
+        let imageUrl = null;
+        if (chatSelectedImageFile) {
+            const fileName = `chat-${poolId}-${Date.now()}.jpg`;
+            const { error: upErr } = await supabaseClient.storage.from('receipts').upload(fileName, chatSelectedImageFile);
+            if (upErr) throw upErr;
+            imageUrl = supabaseClient.storage.from('receipts').getPublicUrl(fileName).data.publicUrl;
+        }
+
+        const { error } = await supabaseClient.from('messages').insert([{
+            pool_id: poolId,
+            sender_id: userId,
+            text: text || null,
+            image_url: imageUrl
+        }]);
+        if (error) throw error;
+
+        textInput.value = '';
+        clearChatImage();
+    } catch (e) {
+        console.error('❌ خطا در ارسال پیام:', e);
+        Swal.fire({ text: 'ارسال پیام ناموفق بود', icon: 'error' });
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-paper-plane text-xs"></i>';
+    }
+};
+
+window.openChatGroupInfo = async function() {
+    const modal = document.getElementById('chat-group-info-modal');
+    const listEl = document.getElementById('chat-group-members-list');
+    if (!modal || !listEl) return;
+
+    modal.classList.remove('hidden');
+    listEl.innerHTML = '<p class="text-center text-[10px] text-slate-300 font-bold py-10">در حال بارگذاری اعضا...</p>';
+
+    const poolId = sessionStorage.getItem('pool_id');
+    const { data: members, error } = await supabaseClient
+        .from('members')
+        .select('id, full_name, avatar_url, is_admin')
+        .eq('pool_id', poolId)
+        .order('is_admin', { ascending: false });
+
+    if (error || !members) {
+        listEl.innerHTML = '<p class="text-center text-[10px] text-rose-400 font-bold py-10">خطا در بارگذاری اعضا</p>';
+        return;
+    }
+
+    listEl.innerHTML = members.map(m => `
+        <div class="flex items-center gap-3 p-3 rounded-2xl border border-slate-50 bg-slate-50/60">
+            ${m.avatar_url
+                ? `<img src="${m.avatar_url}" class="w-11 h-11 rounded-2xl object-cover">`
+                : `<div class="w-11 h-11 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center"><i class="fas fa-user"></i></div>`}
+            <span class="text-[11px] font-black text-slate-700 flex-1 text-right">${m.full_name || 'عضو'}</span>
+            ${m.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : ''}
+        </div>`).join('');
+};
+
+window.closeChatGroupInfo = function() {
+    document.getElementById('chat-group-info-modal')?.classList.add('hidden');
+};
