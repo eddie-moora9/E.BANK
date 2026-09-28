@@ -5,7 +5,7 @@
   "description": "سیستم مدیریت هوشمند صندوق‌های قرض‌الحسنه و سرمایه‌گذاری جمعی",
   "lang": "fa",
   "dir": "rtl",
-  "start_url": "/index.html",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
