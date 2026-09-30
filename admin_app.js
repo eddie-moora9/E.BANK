@@ -469,8 +469,42 @@ async function calculateStats(poolId) {
  ************************************************/
 window.updateStatus = async function(id, newStatus) {
     const myPoolId = sessionStorage.getItem('pool_id');
-    
+
     try {
+        // فیش ترکیبی: «قسط ماهانه» + «بازپرداخت وام» با یک عکس دو ردیف pending می‌سازند؛ هر دو با هم تایید/رد می‌شوند
+        const { data: main } = await supabaseClient.from('transactions').select('id, receipt_url, status').eq('id', id).single();
+        const ids = [id];
+        if (main && main.receipt_url && main.status === 'pending') {
+            const { data: sibs } = await supabaseClient.from('transactions').select('id')
+                .eq('receipt_url', main.receipt_url).eq('status', 'pending').neq('id', id);
+            (sibs || []).forEach(x => ids.push(x.id));
+        }
+        for (const tid of ids) await applyTxStatus(tid, newStatus, myPoolId);
+
+        await Swal.fire({
+            title: 'عملیات موفق',
+            text: 'تغییرات ثبت شد ✅',
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2.5rem]' },
+            timer: 1200,
+            showConfirmButton: false
+        });
+
+        // رفرش بخش‌های مرتبط بدون لود کامل صفحه
+        if (typeof loadPendingReceipts === 'function') loadPendingReceipts(myPoolId);
+        if (typeof loadOpsTabContent === 'function') loadOpsTabContent(myPoolId);
+        if (typeof calculateStats === 'function') calculateStats(myPoolId);
+        if (typeof loadAllMembers === 'function') loadAllMembers(myPoolId);
+        if (typeof loadTransactionLog === 'function') loadTransactionLog(myPoolId);
+    } catch (e) {
+        console.error("Critical Update Error:", e);
+        Swal.fire({ title: 'خطا در تایید', text: e.message, icon: 'error' });
+    }
+};
+
+// منطق تایید/رد یک ردیف تراکنش (بدون پیام و رفرش)
+async function applyTxStatus(id, newStatus, myPoolId) {
         if (newStatus === 'approved') {
             // ۱. دریافت اطلاعات فیش
             const { data: tx } = await supabaseClient
@@ -486,7 +520,8 @@ window.updateStatus = async function(id, newStatus) {
                 .maybeSingle();
 
             const currentN = set ? Number(set.investment_percent || 0) : 0;
-            const investAmount = Math.floor((Number(tx.amount) * currentN) / 100);
+            // بازپرداخت وام: کل مبلغ به صندوق اصلی برمی‌گردد (وام هم بدون کسر سرمایه‌گذاری از آن خارج شده بود)
+            const investAmount = tx.category === 'loan_repayment' ? 0 : Math.floor((Number(tx.amount) * currentN) / 100);
 
             // ۲. آپدیت وضعیت فیش
             await supabaseClient.from('transactions').update({ 
@@ -502,8 +537,9 @@ window.updateStatus = async function(id, newStatus) {
                     .eq('member_id', tx.member_id)
                     .eq('status', 'approved');
 
+                // بازپرداخت وام نوبتی فقط از دسته‌ی loan_repayment است (قسط ثابت 'monthly' سپرده است، نه بازپرداخت)
                 const totalIn = allTxs
-                    .filter(t => t.type === 'in' && t.category === 'monthly')
+                    .filter(t => t.type === 'in' && t.category === 'loan_repayment')
                     .reduce((s, a) => s + Number(a.amount), 0);
 
                 const totalOutMonthly = allTxs
@@ -542,6 +578,8 @@ window.updateStatus = async function(id, newStatus) {
 
                         rawChange = daysBeforeDue >= winDays ? peak : perDay * daysBeforeDue;
                     }
+                } else if (tx.category === 'loan_repayment') {
+                    rawChange = 0; // سکه فقط برای قسط ماهانه است؛ بازپرداخت وام سکه‌ی جدا ندارد
                 } else {
                     // ۴. سیستم سکه (جایگزین امتیاز ۰-۱۰۰ قدیمی) — فقط برای قسط ماهانه
                     // مبنا: تاریخ ثبت فیش توسط عضو (100% طبق تایید خودت)
@@ -571,7 +609,7 @@ window.updateStatus = async function(id, newStatus) {
                 };
 
                 // 🔥 شرط: اگر بدهی نوبتی تسویه شد (فقط برای واریزی ماهانه، نه خیریه)
-                if (tx.category === 'monthly' && totalIn >= totalOutMonthly) {
+                if ((tx.category === 'monthly' || tx.category === 'loan_repayment') && totalIn >= totalOutMonthly) {
                     // عضو واجد شرایط میشه و میره ته صف
                     memberUpdateData.eligible_at = new Date().toISOString();
                     console.log(`✅ ${mem.full_name} تسویه کرد و وارد صف شد.`);
@@ -587,28 +625,7 @@ window.updateStatus = async function(id, newStatus) {
             await supabaseClient.from('transactions').update({ status: newStatus }).eq('id', id);
         }
 
-        await Swal.fire({
-            title: 'عملیات موفق',
-            text: 'تغییرات ثبت شد ✅',
-            icon: 'success',
-            confirmButtonColor: '#10b981',
-            customClass: { popup: 'rounded-[2.5rem]' },
-            timer: 1200,
-            showConfirmButton: false
-        });
-
-        // رفرش بخش‌های مرتبط بدون لود کامل صفحه
-        if (typeof loadPendingReceipts === 'function') loadPendingReceipts(myPoolId);
-        if (typeof loadOpsTabContent === 'function') loadOpsTabContent(myPoolId);
-        if (typeof calculateStats === 'function') calculateStats(myPoolId);
-        if (typeof loadAllMembers === 'function') loadAllMembers(myPoolId);
-        if (typeof loadTransactionLog === 'function') loadTransactionLog(myPoolId);
-
-    } catch (e) {
-        console.error("Critical Update Error:", e);
-        Swal.fire({ title: 'خطا در تایید', text: e.message, icon: 'error' });
-    }
-};
+}
 
 
 
@@ -1583,7 +1600,7 @@ async function loadLoanFundQuickview() {
         const { data: txs } = await supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved');
 
         const queue = (members || []).map(m => {
-            const userIn = (txs || []).filter(t => t.member_id === m.id && t.type === 'in' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
+            const userIn = (txs || []).filter(t => t.member_id === m.id && t.type === 'in' && t.category === 'loan_repayment').reduce((s, a) => s + Number(a.amount), 0);
             const userOutMonthly = (txs || []).filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
             const monthlyDebt = Math.max(0, userOutMonthly - userIn);
             return { ...m, isEligible: isLoanQueueEligible(m, monthlyDebt) };
@@ -1654,7 +1671,7 @@ function escapeHtml(str) {
  * لاگ کامل و شفاف تراکنش‌ها — هر ورود/خروجی از هر صندوق
  ************************************************/
 function txLabel(t) {
-    const categoryLabels = { monthly: 'قسط ماهانه', emergency: 'مساعده‌ی رأی‌گیری', charity: 'خیریه', coin_assistance: 'مساعده‌ی سکه‌ای', opening: 'آورده‌ی اولیه' };
+    const categoryLabels = { monthly: 'قسط ماهانه', emergency: 'مساعده‌ی رأی‌گیری', charity: 'خیریه', coin_assistance: 'مساعده‌ی سکه‌ای', opening: 'آورده‌ی اولیه', loan_repayment: 'بازپرداخت وام' };
     const typeLabels = { in: 'واریز', out: 'برداشت', capital_spend: 'خرید دارایی پروژه', profit: 'ثبت سود', distribution: 'توزیع سود' };
     if (t.type === 'in' || t.type === 'out') {
         return `${typeLabels[t.type]} ${categoryLabels[t.category] || 'عمومی'}`;
@@ -2706,10 +2723,11 @@ window.adjustOpeningDebt = async function() {
 
     try {
         // بدهی فعلی همان دسته (برای جلوگیری از کاهشِ بیش از بدهی)
-        const { data: catTxs } = await supabaseClient.from('transactions').select('amount, type')
-            .eq('member_id', memberId).eq('status', 'approved').eq('category', cat);
-        const sum = t => (catTxs || []).filter(x => x.type === t).reduce((a, x) => a + Number(x.amount), 0);
-        const currentDebt = Math.max(0, sum('out') - sum('in'));
+        const repayCat = cat === 'monthly' ? 'loan_repayment' : cat; // بازپرداخت وام نوبتی دسته‌ی جدا دارد
+        const { data: catTxs } = await supabaseClient.from('transactions').select('amount, type, category')
+            .eq('member_id', memberId).eq('status', 'approved').in('category', [cat, repayCat]);
+        const sum = (t, c) => (catTxs || []).filter(x => x.type === t && x.category === c).reduce((a, x) => a + Number(x.amount), 0);
+        const currentDebt = Math.max(0, sum('out', cat) - sum('in', repayCat));
 
         if (delta < 0 && amount > currentDebt) {
             return Swal.fire({ text: `بدهی فعلی ${catLabel} ${currentDebt.toLocaleString()} ت است؛ بیشتر از آن قابل کاهش نیست.`, icon: 'warning' });
@@ -2725,7 +2743,7 @@ window.adjustOpeningDebt = async function() {
             amount: amount,
             status: 'approved',
             type: delta > 0 ? 'out' : 'in',
-            category: cat,
+            category: delta > 0 ? cat : repayCat,
             receipt_url: `بدهی اولیه - تعدیل ${delta > 0 ? 'افزایش' : 'کاهش'} (${catLabel}): ${memberName}`
         }]);
         if (txErr) throw txErr;
@@ -3091,8 +3109,10 @@ window.updateOpeningNetPreview = function() {
     if (loan + emg <= 0) { el.classList.add('hidden'); return; }
     const net = total - loan - emg;
     el.classList.remove('hidden');
-    el.className = 'text-[10px] font-black text-center ' + (net < 0 ? 'text-rose-600' : 'text-emerald-600');
-    el.innerText = net < 0 ? 'بدهی از کل آورده بیشتر است ❌' : `خالص وارد صندوق: ${net.toLocaleString()} ت`;
+    el.className = 'text-[10px] font-black text-center ' + (net < 0 ? 'text-amber-600' : 'text-emerald-600');
+    el.innerText = net < 0
+        ? `⚠️ بدهی از آورده بیشتر است؛ خالص این عضو: منفی ${Math.abs(net).toLocaleString()} ت (از صندوق بیشتر از آورده‌اش گرفته)`
+        : `خالص وارد صندوق: ${net.toLocaleString()} ت`;
 };
 
 window.addNewMember = async function() {
@@ -3122,8 +3142,18 @@ window.addNewMember = async function() {
     if (initialAmount < 0 || debtLoan < 0 || debtEmergency < 0) {
         return Swal.fire({text: "مبالغ نمی‌تواند منفی باشد", icon:'warning'});
     }
+    // بدهی بیشتر از آورده در بانک سنتی طبیعی است (وام بزرگ‌تر از سپرده) → فقط تایید می‌گیریم تا اشتباه تایپی نباشد
     if (totalDebt > initialAmount) {
-        return Swal.fire({text: "مجموع بدهی‌ها نمی‌تواند از کل آورده‌ی عضو بیشتر باشد", icon:'warning'});
+        const conf = await Swal.fire({
+            title: 'بدهی بیشتر از آورده است',
+            html: `<div style="font-size:12px;line-height:2.2;color:#475467">کل آورده: <b>${initialAmount.toLocaleString()}</b> ت<br>مجموع بدهی: <b>${totalDebt.toLocaleString()}</b> ت<br>خالص این عضو در صندوق: <b style="color:#d97706">منفی ${(totalDebt - initialAmount).toLocaleString()}</b> ت<br>مبالغ درست است؟</div>`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'بله، ثبت شود',
+            cancelButtonText: 'اصلاح مبالغ',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+        if (!conf.isConfirmed) return;
     }
     if (debtEmergency > 0 && !emergencyDueISO) {
         return Swal.fire({text: "برای بدهی مساعده، تاریخ سررسید را وارد کنید", icon:'warning'});
@@ -3145,6 +3175,23 @@ window.addNewMember = async function() {
             confirmButtonColor: '#e11d48',
             customClass: { popup: 'rounded-[2.5rem]' }
         });
+    }
+
+    // ✅ هیچ برداشتی نباید صندوق را منفی کند: عضوی که بدهی‌اش از آورده‌اش بیشتر است فقط وقتی ثبت می‌شود که
+    // موجودی صندوق اصلی کمبودش را پوشش بدهد. این چک قبل از ساخت حساب کاربری انجام می‌شود (تا عضو نیمه‌کاره نماند).
+    const shortfallNeeded = totalDebt - initialAmount; // مثبت = خالصِ منفی عضو
+    if (shortfallNeeded > 0) {
+        const balances = await getCurrentFundBalances(poolId);
+        const mainNow = Number(balances.mainFund) || 0;
+        if (mainNow < shortfallNeeded) {
+            return Swal.fire({
+                title: 'موجودی صندوق کافی نیست',
+                html: `<div style=\"font-size:12px;line-height:2.2;color:#475467\">ثبت این عضو <b>${shortfallNeeded.toLocaleString()}</b> ت از صندوق اصلی کم می‌کند،<br>ولی موجودی صندوق اصلی <b>${mainNow.toLocaleString()}</b> ت است<br>(کمبود: <b style=\"color:#e11d48\">${(shortfallNeeded - mainNow).toLocaleString()}</b> ت).<br><br>اول اعضای دارای آورده‌ی مثبت را ثبت کنید، بعد این عضو را ثبت کنید.</div>`,
+                icon: 'error',
+                confirmButtonColor: '#e11d48',
+                customClass: { popup: 'rounded-[2.5rem]' }
+            });
+        }
     }
 
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> در حال ثبت...'; }
@@ -3176,7 +3223,7 @@ window.addNewMember = async function() {
 
         // ثبت تراکنش‌های اولیه: آورده‌ی کل (دسته‌ی opening) + هر بدهی به‌صورت برداشت هم‌دسته
         // نتیجه: موجودی صندوق = کل آورده − بدهی‌ها، و بدهی فقط با بازپرداخت واقعی کم می‌شود
-        if (initialAmount > 0) {
+        if (initialAmount > 0 || totalDebt > 0) {
             const { data: settings } = await supabaseClient
                 .from('settings')
                 .select('investment_percent')
@@ -3186,11 +3233,12 @@ window.addNewMember = async function() {
             const investPercent = settings ? Number(settings.investment_percent) : 0;
             const netCash = initialAmount - totalDebt; // پولی که واقعاً در صندوق می‌ماند
             let investVal = 0;
-            if (investCheck && investPercent > 0) {
+            if (investCheck && investPercent > 0 && netCash > 0) { // خالص منفی/صفر → سرمایه‌گذاری معنا ندارد
                 investVal = Math.floor((netCash * investPercent) / 100);
             }
 
-            const rows = [{
+            const rows = [];
+            if (initialAmount > 0) rows.push({
                 pool_id: poolId,
                 member_id: authData.user.id,
                 amount: initialAmount,
@@ -3199,7 +3247,7 @@ window.addNewMember = async function() {
                 category: 'opening',
                 invest_val: investVal,
                 receipt_url: `ثبت اولیه عضو: ${name}`
-            }];
+            });
             if (debtLoan > 0) rows.push({
                 pool_id: poolId, member_id: authData.user.id, amount: debtLoan,
                 status: 'approved', type: 'out', category: 'monthly',
@@ -3869,7 +3917,7 @@ async function updateProfileFinancials(memberId) {
 
         // ۲. محاسبه مجموع واریزی‌ها (کل واریزی، هر دسته‌ای) و مجموع واریزیِ مربوط به سقف بدهی (فقط وام ماهانه + مساعده)
         const totalIn = txs ? txs.reduce((sum, t) => sum + Number(t.amount), 0) : 0;
-        const totalInForDebt = txs ? txs.filter(t => t.category === 'monthly' || t.category === 'emergency').reduce((sum, t) => sum + Number(t.amount), 0) : 0;
+        const totalInForDebt = txs ? txs.filter(t => t.category === 'loan_repayment' || t.category === 'emergency').reduce((sum, t) => sum + Number(t.amount), 0) : 0;
 
         // ۳. پیدا کردن سقف بدهی عضو از متغیر سراسری
         const member = allMembersData.find(x => String(x.id) === String(memberId));
@@ -4583,16 +4631,33 @@ async function loadPendingReceipts(poolId) {
             return;
         }
 
-        container.innerHTML = txs.map(t => {
+        // گروه‌بندی بر اساس عکس فیش: قسط ماهانه + بازپرداخت وام (هر دو با یک فیش) یک کارت می‌شوند
+        const groups = new Map();
+        txs.forEach(t => {
+            const key = (t.receipt_url && t.category !== 'charity') ? t.receipt_url + '|' + t.member_id : 'id:' + t.id;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(t);
+        });
+        const cards = Array.from(groups.values()).map(rows => {
+            const primary = rows.find(r => r.category === 'monthly') || rows[0];
+            return { ...primary, amount: rows.reduce((s, r) => s + Number(r.amount), 0), _rows: rows };
+        });
+
+        container.innerHTML = cards.map(t => {
             const date = new Date(t.created_at).toLocaleDateString('fa-IR-u-nu-latn');
             const senderName = t.members ? t.members.full_name : 'عضو ناشناس';
+            const repayRow = t._rows.find(r => r.category === 'loan_repayment');
+            const splitNote = (t._rows.length > 1 && repayRow)
+                ? `قسط ${Number(t._rows.find(r => r.category !== 'loan_repayment').amount).toLocaleString()} + بازپرداخت وام ${Number(repayRow.amount).toLocaleString()}`
+                : '';
 
             const catInfo = {
                 monthly: { label: 'قسط ماهانه', cls: 'bg-indigo-50 text-indigo-600' },
                 emergency: { label: 'مساعده', cls: 'bg-amber-50 text-amber-600' },
                 coin_assistance: { label: 'مساعده سکه‌ای', cls: 'bg-yellow-50 text-yellow-600' },
                 charity: { label: 'خیریه', cls: 'bg-emerald-50 text-emerald-600' },
-                opening: { label: 'آورده‌ی اولیه', cls: 'bg-slate-100 text-slate-600' }
+                opening: { label: 'آورده‌ی اولیه', cls: 'bg-slate-100 text-slate-600' },
+                loan_repayment: { label: 'بازپرداخت وام', cls: 'bg-violet-50 text-violet-600' }
             }[t.category] || { label: 'نامشخص', cls: 'bg-slate-100 text-slate-500' };
 
             return `
@@ -4610,12 +4675,13 @@ async function loadPendingReceipts(poolId) {
                     <div class="text-right">
                         <h5 class="text-xs font-[900] text-slate-800">${senderName}</h5>
                         <span class="inline-block mt-1 text-[7px] font-black px-2 py-0.5 rounded-full ${catInfo.cls}">${catInfo.label}</span>
+                        ${splitNote ? `<p class="text-[8px] text-violet-600 font-black mt-1">${splitNote}</p>` : ''}
                     </div>
                 </div>
             </div>`;
         }).join('');
 
-        updateAccordionDot('dot-ops-1', txs.length);
+        updateAccordionDot('dot-ops-1', cards.length);
         if (typeof updateTaskBadge === 'function') updateTaskBadge(cleanPoolId);
 
     } catch (e) {
@@ -4785,7 +4851,7 @@ window.loadOpsTabContent = async function(poolId) {
 
             // کل دریافتی نوبتی / کل واریزیِ همون قسط ماهانه
             const totalOutMonthly = sumBy('out', 'monthly');
-            const monthlyDebt = Math.max(0, totalOutMonthly - sumBy('in', 'monthly'));
+            const monthlyDebt = Math.max(0, totalOutMonthly - sumBy('in', 'loan_repayment'));
 
             // مساعده: دریافتی منهای بازپرداختی همون دسته
             const emergencyDebt = Math.max(0, sumBy('out', 'emergency') - sumBy('in', 'emergency'));

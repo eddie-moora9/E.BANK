@@ -319,7 +319,7 @@ async function loadUserFinancials(userId, poolId) {
 async function calculateMyTotalDeposits(userId, poolId) {
     const { data } = await supabaseClient.from('transactions').select('amount, category').eq('member_id', userId).eq('pool_id', poolId).eq('status', 'approved').eq('type', 'in');
     // خیریه پس‌اندازِ شخصی عضو نیست، و مساعده/مساعده‌سکه‌ای هم فقط بازپرداخت بدهیه نه پس‌انداز جدید — پس نباید تو موجودی کل حساب بشن
-    const excluded = ['charity', 'emergency', 'coin_assistance'];
+    const excluded = ['charity', 'emergency', 'coin_assistance', 'loan_repayment'];
     const total = data ? data.filter(t => !excluded.includes(t.category)).reduce((s, i) => s + Number(i.amount), 0) : 0;
     const el = document.getElementById('user-total-balance');
     if (el) el.innerText = total.toLocaleString() + ' تومان';
@@ -586,6 +586,16 @@ window.uploadReceipt = async function() {
         return Swal.fire({ text: "لطفاً تصویر فیش را انتخاب کنید ❌", icon: 'warning' });
     }
 
+    // بازپرداخت وام (اختیاری، علاوه بر قسط ثابت) — فقط در پرداخت ماهانه و حداکثر تا مانده‌ی وام
+    const repayRaw = document.getElementById('loan-repay-input')?.value;
+    const repayAmount = (category === 'monthly' && repayRaw) ? Number(repayRaw) : 0;
+    if (repayAmount < 0 || isNaN(repayAmount)) {
+        return Swal.fire({ text: "مبلغ بازپرداخت وام معتبر نیست ❌", icon: 'warning' });
+    }
+    if (repayAmount > 0 && repayAmount > (Number(paymentModalCache?.monthlyLoanDebt) || 0)) {
+        return Swal.fire({ text: "مبلغ بازپرداخت از مانده‌ی وام شما بیشتر است ❌", icon: 'warning' });
+    }
+
     // ۲. فیلتر فقط عکس (JPG, PNG)
     if (!file.type.startsWith('image/')) {
         return Swal.fire({ text: "فقط فایل تصویری مجاز است ❌", icon: 'error' });
@@ -615,7 +625,8 @@ window.uploadReceipt = async function() {
         const { data: urlData } = supabaseClient.storage.from('receipts').getPublicUrl(fileName);
 
         // ۶. ثبت سند مالی در جدول تراکنش‌ها
-        const { error: dbErr } = await supabaseClient.from('transactions').insert([{
+        // یک عکس، دو ردیف: قسط ثابت (سپرده) + بازپرداخت وام (فقط کم‌کردن بدهی) — مدیر هر دو را با هم تایید می‌کند
+        const rows = [{
             member_id: userId,
             pool_id: poolId,
             amount: Number(amount),
@@ -623,7 +634,17 @@ window.uploadReceipt = async function() {
             type: 'in',
             category: category,
             receipt_url: urlData.publicUrl
-        }]);
+        }];
+        if (repayAmount > 0) rows.push({
+            member_id: userId,
+            pool_id: poolId,
+            amount: repayAmount,
+            status: 'pending',
+            type: 'in',
+            category: 'loan_repayment',
+            receipt_url: urlData.publicUrl
+        });
+        const { error: dbErr } = await supabaseClient.from('transactions').insert(rows);
 
         if (dbErr) throw dbErr;
 
@@ -814,6 +835,7 @@ const date = new Date(t.created_at).toLocaleDateString('fa-IR', {
             const inLabels = {
                 monthly: '↑ واریز قسط ماهانه',
                 emergency: '↑ بازپرداخت مساعده',
+                loan_repayment: '↩ بازپرداخت وام نوبتی',
                 coin_assistance: '↑ بازپرداخت مساعده سکه‌ای',
                 charity: '💚 کمک به خیریه'
             };
@@ -1453,7 +1475,7 @@ async function getQueueRanking(poolId) {
     const txs = txsRes.data || [];
 
     const queueData = members.map(m => {
-        const userIn = txs.filter(t => t.member_id === m.id && t.type === 'in' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
+        const userIn = txs.filter(t => t.member_id === m.id && t.type === 'in' && t.category === 'loan_repayment').reduce((s, a) => s + Number(a.amount), 0);
         const userOutMonthly = txs.filter(t => t.member_id === m.id && t.type === 'out' && t.category === 'monthly').reduce((s, a) => s + Number(a.amount), 0);
 
         // شرط شایستگی: بدهی صفر + داشتن تاریخ صلاحیت
@@ -2034,7 +2056,7 @@ async function getMemberDebtSummary(userId, poolId) {
             .eq('member_id', userId)
             .eq('pool_id', poolId)
             .eq('status', 'approved')
-            .in('category', ['monthly', 'emergency', 'coin_assistance']),
+            .in('category', ['monthly', 'loan_repayment', 'emergency', 'coin_assistance']),
         supabaseClient
             .from('transactions')
             .select('amount')
@@ -2049,7 +2071,7 @@ async function getMemberDebtSummary(userId, poolId) {
         .reduce((s, t) => s + Number(t.amount || 0), 0);
 
     return {
-        monthlyLoanDebt: Math.max(0, sumBy('out', 'monthly') - sumBy('in', 'monthly')), // مانده‌ی کل وام نوبتی دریافتی
+        monthlyLoanDebt: Math.max(0, sumBy('out', 'monthly') - sumBy('in', 'loan_repayment')), // مانده‌ی وام نوبتی = دریافتی منهای «بازپرداخت وام» (قسط ثابت بدهی را کم نمی‌کند)
         emergency: Math.max(0, sumBy('out', 'emergency') - sumBy('in', 'emergency')),
         coin_assistance: Math.max(0, sumBy('out', 'coin_assistance') - sumBy('in', 'coin_assistance')),
         totalProfit: (profitTxs || []).reduce((s, t) => s + Number(t.amount || 0), 0)
@@ -2236,6 +2258,7 @@ window.openDepositDrawer = async function() {
 
         paymentModalCache = {
             monthlyDue: Number(monthlyDue) || 0,
+            monthlyLoanDebt: debts.monthlyLoanDebt,
             emergencyDebt: debts.emergency,
             coinAssistDebt: debts.coin_assistance,
             emergencyDueDate: mData?.emergency_due_date || null,
@@ -2269,6 +2292,17 @@ window.selectPaymentCategory = function(category) {
         charity: 'خیریه'
     };
     if (titleEl) titleEl.innerText = 'پرداخت: ' + (labels[category] || '');
+
+    // بازپرداخت وام: فقط در پرداخت ماهانه و فقط اگر عضو مانده‌ی وام دارد
+    const repayWrap = document.getElementById('loan-repay-wrap');
+    const repayInput = document.getElementById('loan-repay-input');
+    if (repayInput) repayInput.value = '';
+    if (repayWrap) {
+        const debt = Number(paymentModalCache.monthlyLoanDebt) || 0;
+        repayWrap.classList.toggle('hidden', !(category === 'monthly' && debt > 0));
+        const hint = document.getElementById('loan-repay-hint');
+        if (hint) hint.innerText = 'مانده وام: ' + debt.toLocaleString() + ' ت';
+    }
 
     // پر کردن مبلغ پیش‌فرض بر اساس دسته
     if (amountInput) {
