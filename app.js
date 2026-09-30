@@ -817,7 +817,13 @@ const date = new Date(t.created_at).toLocaleDateString('fa-IR', {
                 coin_assistance: '↑ بازپرداخت مساعده سکه‌ای',
                 charity: '💚 کمک به خیریه'
             };
-            const label = (isOut ? outLabels[t.category] : inLabels[t.category]) || (isOut ? '🏆 دریافت برندگی / وام' : '↑ واریز قسط ماهانه');
+            // آورده‌ی اولیه و بدهی انتقالی از بانک سنتی، برچسب جدا دارند (نه «دریافت وام» یا «قسط ماهانه»)
+            const isOpeningDebtRow = isOut && (t.receipt_url || '').startsWith('بدهی اولیه');
+            const label = t.category === 'opening'
+                ? '🏦 آورده‌ی اولیه (بانک سنتی)'
+                : isOpeningDebtRow
+                    ? '📋 بدهی اولیه (انتقالی از بانک سنتی)'
+                    : (isOut ? outLabels[t.category] : inLabels[t.category]) || (isOut ? '🏆 دریافت برندگی / وام' : '↑ واریز قسط ماهانه');
 
             return `
                 <div class="bg-white p-5 rounded-[2rem] border border-slate-50 mb-3 flex justify-between items-center shadow-sm animate__animated animate__fadeIn">

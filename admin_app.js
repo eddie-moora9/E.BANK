@@ -1532,6 +1532,7 @@ async function checkMonthlyLoanWarning(poolId) {
             .eq('status', 'approved')
             .eq('type', 'out')
             .eq('category', 'monthly')
+            .not('receipt_url', 'like', 'بدهی اولیه%') // بدهی انتقالی وام پرداخت‌شده‌ی این ماه نیست
             .gte('created_at', firstDayOfMonth)
             .limit(1);
 
@@ -1653,7 +1654,7 @@ function escapeHtml(str) {
  * لاگ کامل و شفاف تراکنش‌ها — هر ورود/خروجی از هر صندوق
  ************************************************/
 function txLabel(t) {
-    const categoryLabels = { monthly: 'قسط ماهانه', emergency: 'مساعده‌ی رأی‌گیری', charity: 'خیریه', coin_assistance: 'مساعده‌ی سکه‌ای' };
+    const categoryLabels = { monthly: 'قسط ماهانه', emergency: 'مساعده‌ی رأی‌گیری', charity: 'خیریه', coin_assistance: 'مساعده‌ی سکه‌ای', opening: 'آورده‌ی اولیه' };
     const typeLabels = { in: 'واریز', out: 'برداشت', capital_spend: 'خرید دارایی پروژه', profit: 'ثبت سود', distribution: 'توزیع سود' };
     if (t.type === 'in' || t.type === 'out') {
         return `${typeLabels[t.type]} ${categoryLabels[t.category] || 'عمومی'}`;
@@ -1735,33 +1736,9 @@ window.decideCoinRequest = async function(requestId, approve) {
         let dueDate = null;
 
         if (approve) {
-            // مهلت بازپرداخت رو از مدیر می‌پرسیم (مدل توافق‌شده: بدون قسط ثابت، فقط سررسید)
-            const dueResult = await Swal.fire({
-                title: 'مهلت بازپرداخت؟',
-                input: 'select',
-                inputOptions: { '30': '۳۰ روز', '60': '۶۰ روز', '90': '۹۰ روز', 'custom': 'تاریخ دلخواه' },
-                inputValue: '60',
-                showCancelButton: true,
-                confirmButtonText: 'تایید و واریز',
-                cancelButtonText: 'انصراف',
-                customClass: { popup: 'rounded-[2.5rem]' }
-            });
-            if (!dueResult.isConfirmed) return;
-
-            if (dueResult.value === 'custom') {
-                const dateResult = await Swal.fire({
-                    title: 'تاریخ سررسید را وارد کنید',
-                    input: 'date',
-                    inputValue: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10),
-                    showCancelButton: true,
-                    confirmButtonText: 'تایید',
-                    cancelButtonText: 'انصراف'
-                });
-                if (!dateResult.isConfirmed || !dateResult.value) return;
-                dueDate = new Date(dateResult.value).toISOString();
-            } else {
-                dueDate = new Date(Date.now() + Number(dueResult.value) * 86400000).toISOString();
-            }
+            // مهلت بازپرداخت رو از مدیر می‌پرسیم (تاریخ شمسی + میانبر ۳۰/۶۰/۹۰ روز)
+            dueDate = await promptDueDate('مهلت بازپرداخت؟', 'تایید و واریز');
+            if (!dueDate) return;
         }
 
         const { data: ok, error } = await supabaseClient.rpc('decide_coin_request', {
@@ -2660,31 +2637,115 @@ window.openEditModalById = async function(memberId) {
     document.getElementById('edit-member-is-admin').checked = m.is_admin || false;
     document.getElementById('edit-member-pass').value = "";
 
-    // پر کردن فیلدهای جدید (غیرفعال) از آخرین تراکنش ورودی
+    // پر کردن فیلدهای غیرفعال: کل آورده‌ی اولیه + بدهی اولیه (بعد از تعدیل‌ها)
     try {
         const { data: txs } = await supabaseClient
             .from('transactions')
-            .select('amount, invest_val')
+            .select('amount, invest_val, type, category, receipt_url, created_at')
             .eq('member_id', memberId)
             .eq('status', 'approved')
-            .eq('type', 'in')
-            .order('created_at', { ascending: false })
-            .limit(1);
+            .order('created_at', { ascending: false });
 
-        if (txs && txs.length > 0) {
-            const tx = txs[0];
-            document.getElementById('edit-member-initial').value = tx.amount || 0;
-            // اگر invest_val > 0 یعنی چک‌باکس فعال بوده
-            document.getElementById('edit-member-invest-check').checked = (tx.invest_val > 0);
-        } else {
-            document.getElementById('edit-member-initial').value = 0;
-            document.getElementById('edit-member-invest-check').checked = false;
-        }
+        const list = txs || [];
+        // آورده‌ی اولیه: دسته‌ی opening؛ برای اعضای قدیمی (قبل از این تغییر) آخرین واریزی
+        const openingTx = list.find(t => t.type === 'in' && t.category === 'opening')
+                       || list.find(t => t.type === 'in');
+        document.getElementById('edit-member-initial').value = openingTx ? (openingTx.amount || 0) : 0;
+        document.getElementById('edit-member-invest-check').checked = !!(openingTx && openingTx.invest_val > 0);
+
+        const isOpeningDebt = t => (t.receipt_url || '').startsWith('بدهی اولیه');
+        const openingDebt = list.filter(t => t.type === 'out' && isOpeningDebt(t)).reduce((a, t) => a + Number(t.amount), 0)
+                          - list.filter(t => t.type === 'in' && isOpeningDebt(t)).reduce((a, t) => a + Number(t.amount), 0);
+        const debtEl = document.getElementById('edit-member-opening-debt');
+        if (debtEl) debtEl.innerText = Math.max(0, openingDebt).toLocaleString() + ' ت';
     } catch (e) {
         console.warn("Could not load initial transaction:", e);
     }
 
     document.getElementById('edit-modal').classList.remove('hidden');
+};
+
+/************************************************
+ * اصلاح بدهی اولیه‌ی عضو — همیشه با تراکنش تعدیلی (ردیف قبلی دست نمی‌خورد)
+ * افزایش بدهی = برداشت (out) هم‌دسته | کاهش بدهی = واریز (in) هم‌دسته
+ ************************************************/
+window.adjustOpeningDebt = async function() {
+    const memberId = document.getElementById('edit-member-id').value;
+    const memberName = document.getElementById('edit-member-name').value;
+    const poolId = sessionStorage.getItem('pool_id');
+    if (!memberId) return;
+
+    const form = await Swal.fire({
+        title: 'اصلاح بدهی اولیه',
+        html: `
+            <select id="adj-cat" class="swal2-input" style="font-size:13px">
+                <option value="monthly">وام نوبتی</option>
+                <option value="emergency">مساعده</option>
+            </select>
+            <input id="adj-amount" type="number" class="swal2-input" style="font-size:13px" placeholder="مبلغ تعدیل (مثبت = افزایش بدهی، منفی = کاهش)">
+            <p style="font-size:10px;color:#64748b;margin:10px 0 6px;font-weight:900">سررسید (فقط برای افزایش بدهی مساعده)</p>
+            <div id="adj-due-picker"></div>`,
+        didOpen: () => renderJalaliPicker('adj-due-picker', 60),
+        showCancelButton: true,
+        confirmButtonText: 'ثبت تعدیل',
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem]' },
+        preConfirm: () => {
+            const cat = document.getElementById('adj-cat').value;
+            const delta = parseFloat(document.getElementById('adj-amount').value);
+            const due = getJalaliPickerISO('adj-due-picker');
+            if (!delta || isNaN(delta)) { Swal.showValidationMessage('مبلغ تعدیل را وارد کنید'); return false; }
+            if (cat === 'emergency' && delta > 0 && !due) { Swal.showValidationMessage('برای افزایش مساعده، سررسید لازم است'); return false; }
+            return { cat, delta, due };
+        }
+    });
+    if (!form.isConfirmed) return;
+    const { cat, delta, due } = form.value;
+    const amount = Math.abs(delta);
+    const catLabel = cat === 'monthly' ? 'وام نوبتی' : 'مساعده';
+
+    try {
+        // بدهی فعلی همان دسته (برای جلوگیری از کاهشِ بیش از بدهی)
+        const { data: catTxs } = await supabaseClient.from('transactions').select('amount, type')
+            .eq('member_id', memberId).eq('status', 'approved').eq('category', cat);
+        const sum = t => (catTxs || []).filter(x => x.type === t).reduce((a, x) => a + Number(x.amount), 0);
+        const currentDebt = Math.max(0, sum('out') - sum('in'));
+
+        if (delta < 0 && amount > currentDebt) {
+            return Swal.fire({ text: `بدهی فعلی ${catLabel} ${currentDebt.toLocaleString()} ت است؛ بیشتر از آن قابل کاهش نیست.`, icon: 'warning' });
+        }
+        if (delta > 0) {
+            const balances = await getCurrentFundBalances(poolId);
+            if (amount > balances.mainFund) return insufficientFundsAlert('صندوق اصلی', amount, balances.mainFund);
+        }
+
+        const { error: txErr } = await supabaseClient.from('transactions').insert([{
+            pool_id: poolId,
+            member_id: memberId,
+            amount: amount,
+            status: 'approved',
+            type: delta > 0 ? 'out' : 'in',
+            category: cat,
+            receipt_url: `بدهی اولیه - تعدیل ${delta > 0 ? 'افزایش' : 'کاهش'} (${catLabel}): ${memberName}`
+        }]);
+        if (txErr) throw txErr;
+
+        const { data: mData } = await supabaseClient.from('members').select('debt_target').eq('id', memberId).single();
+        const memberUpdate = { debt_target: Math.max(0, (Number(mData?.debt_target) || 0) + delta) };
+        if (cat === 'emergency' && delta > 0) memberUpdate.emergency_due_date = due;
+        if (cat === 'monthly' && delta > 0) memberUpdate.eligible_at = null;                      // بدهی نوبتی دارد → خارج از صف
+        if (cat === 'monthly' && delta < 0 && currentDebt - amount === 0) memberUpdate.eligible_at = new Date().toISOString(); // تسویه → ورود به صف
+        const { error: memErr } = await supabaseClient.from('members').update(memberUpdate).eq('id', memberId);
+        if (memErr) throw memErr;
+
+        await Swal.fire({ title: 'تعدیل ثبت شد ✅', icon: 'success', timer: 1500, showConfirmButton: false });
+        loadAllMembers(poolId);
+        calculateStats(poolId);
+        if (typeof loadOpsTabContent === 'function') loadOpsTabContent(poolId);
+        openEditModalById(memberId); // تازه‌سازی مقادیر نمایشی مودال
+    } catch (e) {
+        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
+    }
 };
 
 // تابع کپی کردن شماره کارت
@@ -2868,6 +2929,10 @@ window.openAddMemberModal = function() {
     document.getElementById('new-member-pass').value = '';
     document.getElementById('new-member-shares').value = '';
     document.getElementById('new-member-initial').value = '';
+    document.getElementById('new-member-debt-loan').value = '';
+    document.getElementById('new-member-debt-emergency').value = '';
+    renderJalaliPicker('new-member-debt-emergency-due-picker', 60);
+    const _np = document.getElementById('new-member-net-preview'); if (_np) _np.classList.add('hidden');
     document.getElementById('new-member-invest-check').checked = false;
     document.getElementById('new-member-docs').value = '';
     document.getElementById('docs-status-text').innerText = 'آپلود تصاویر مدارک شناسایی';
@@ -2879,6 +2944,155 @@ window.openAddMemberModal = function() {
 // بستن مودال افزودن عضو
 window.closeAddMemberModal = function() {
     document.getElementById('add-member-modal').classList.add('hidden');
+};
+
+/************************************************
+ * انتخابگر تاریخ شمسی (بدون کتابخانه) + مهلت‌های میانبر
+ * ذخیره در دیتابیس همچنان میلادی (ISO) است؛ فقط ورودی/نمایش شمسی شده
+ ************************************************/
+const JALALI_MONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+function _fa(n) { return Number(n).toLocaleString('fa-IR', { useGrouping: false }); }
+
+function gregorianToJalali(gy, gm, gd) {
+    const gdm = [0,31,59,90,120,151,181,212,243,273,304,334];
+    let jy = (gy > 1600) ? 979 : 0;
+    gy -= (gy > 1600) ? 1600 : 621;
+    const gy2 = (gm > 2) ? (gy + 1) : gy;
+    let days = (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400) - 80 + gd + gdm[gm - 1];
+    jy += 33 * Math.floor(days / 12053); days %= 12053;
+    jy += 4 * Math.floor(days / 1461); days %= 1461;
+    if (days > 365) { jy += Math.floor((days - 1) / 365); days = (days - 1) % 365; }
+    const jm = (days < 186) ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+    const jd = 1 + ((days < 186) ? (days % 31) : ((days - 186) % 30));
+    return [jy, jm, jd];
+}
+
+function jalaliToGregorian(jy, jm, jd) {
+    let gy = (jy > 979) ? 1600 : 621;
+    jy -= (jy > 979) ? 979 : 0;
+    let days = (365 * jy) + (Math.floor(jy / 33) * 8) + Math.floor(((jy % 33) + 3) / 4) + 78 + jd + ((jm < 7) ? (jm - 1) * 31 : ((jm - 7) * 30) + 186);
+    gy += 400 * Math.floor(days / 146097); days %= 146097;
+    if (days > 36524) { gy += 100 * Math.floor(--days / 36524); days %= 36524; if (days >= 365) days++; }
+    gy += 4 * Math.floor(days / 1461); days %= 1461;
+    if (days > 365) { gy += Math.floor((days - 1) / 365); days = (days - 1) % 365; }
+    let gd = days + 1;
+    const sal = [0,31,((gy % 4 === 0 && gy % 100 !== 0) || (gy % 400 === 0)) ? 29 : 28,31,30,31,30,31,31,30,31,30,31];
+    let gm;
+    for (gm = 0; gm < 13; gm++) { if (gd <= sal[gm]) break; gd -= sal[gm]; }
+    return [gy, gm, gd];
+}
+
+function _jalaliDaysInMonth(jy, jm) {
+    if (jm <= 6) return 31;
+    if (jm <= 11) return 30;
+    // اسفند: ۳۰ فقط در سال کبیسه (با رفت‌وبرگشت تبدیل چک می‌شود)
+    const g = jalaliToGregorian(jy, 12, 30);
+    const back = gregorianToJalali(g[0], g[1], g[2]);
+    return (back[0] === jy && back[1] === 12 && back[2] === 30) ? 30 : 29;
+}
+
+function _fillJalaliDays(id) {
+    const y = Number(document.getElementById(id + '-y').value);
+    const m = Number(document.getElementById(id + '-m').value);
+    const dSel = document.getElementById(id + '-d');
+    const keep = Number(dSel.value) || 1;
+    const max = _jalaliDaysInMonth(y, m);
+    dSel.innerHTML = Array.from({ length: max }, (_, i) => `<option value="${i + 1}">${_fa(i + 1)}</option>`).join('');
+    dSel.value = String(Math.min(keep, max));
+}
+
+window.setJalaliPicker = function(id, date) {
+    const [jy, jm, jd] = gregorianToJalali(date.getFullYear(), date.getMonth() + 1, date.getDate());
+    const ySel = document.getElementById(id + '-y');
+    if (!ySel.querySelector(`option[value="${jy}"]`)) ySel.insertAdjacentHTML('beforeend', `<option value="${jy}">${_fa(jy)}</option>`);
+    ySel.value = String(jy);
+    document.getElementById(id + '-m').value = String(jm);
+    const dSel = document.getElementById(id + '-d');
+    dSel.innerHTML = `<option value="${jd}">${_fa(jd)}</option>`;
+    dSel.value = String(jd);
+    _fillJalaliDays(id);
+    dSel.value = String(jd);
+    _updateJalaliHint(id);
+};
+
+function _updateJalaliHint(id) {
+    const hint = document.getElementById(id + '-hint');
+    if (!hint) return;
+    const iso = window.getJalaliPickerISO(id);
+    if (!iso) { hint.innerText = 'تاریخ نامعتبر'; return; }
+    const days = Math.round((new Date(iso) - new Date()) / 86400000);
+    hint.innerText = days >= 0 ? `${_fa(days)} روز دیگر` : `${_fa(Math.abs(days))} روز از سررسید گذشته`;
+}
+
+// می‌سازد: سال/ماه/روز شمسی + دکمه‌های ۳۰/۶۰/۹۰ روز. defaultDays: پیش‌فرض (از امروز)
+window.renderJalaliPicker = function(containerId, defaultDays = 60) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const now = new Date();
+    const cy = gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())[0];
+    const selCls = 'flex-1 bg-white border border-slate-200 rounded-xl p-2 text-sm font-black text-slate-800 outline-none';
+    const yOpts = Array.from({ length: 8 }, (_, i) => `<option value="${cy + i}">${_fa(cy + i)}</option>`).join('');
+    const mOpts = JALALI_MONTHS.map((n, i) => `<option value="${i + 1}">${n}</option>`).join('');
+    el.innerHTML = `
+        <div class="flex gap-2" dir="rtl">
+            <select id="${containerId}-y" class="${selCls}">${yOpts}</select>
+            <select id="${containerId}-m" class="${selCls}">${mOpts}</select>
+            <select id="${containerId}-d" class="${selCls}"></select>
+        </div>
+        <div class="flex gap-2 mt-2" dir="rtl">
+            ${[30, 60, 90].map(n => `<button type="button" data-days="${n}" class="flex-1 bg-amber-100 text-amber-700 rounded-xl py-2 text-[11px] font-black active:scale-95">${_fa(n)} روز</button>`).join('')}
+        </div>
+        <p id="${containerId}-hint" class="text-[10px] text-slate-400 font-bold text-center mt-2"></p>`;
+    const onChange = () => { _fillJalaliDays(containerId); _updateJalaliHint(containerId); };
+    document.getElementById(containerId + '-y').addEventListener('change', onChange);
+    document.getElementById(containerId + '-m').addEventListener('change', onChange);
+    document.getElementById(containerId + '-d').addEventListener('change', () => _updateJalaliHint(containerId));
+    el.querySelectorAll('button[data-days]').forEach(b => b.addEventListener('click', () =>
+        window.setJalaliPicker(containerId, new Date(Date.now() + Number(b.dataset.days) * 86400000))));
+    window.setJalaliPicker(containerId, new Date(Date.now() + defaultDays * 86400000));
+};
+
+// خروجی: ISO میلادی (ساعت ۱۲ ظهر محلی تا جابه‌جایی منطقه‌ی زمانی روز را عوض نکند) یا null
+window.getJalaliPickerISO = function(id) {
+    const y = document.getElementById(id + '-y'), m = document.getElementById(id + '-m'), d = document.getElementById(id + '-d');
+    if (!y || !m || !d || !d.value) return null;
+    const jy = Number(y.value), jm = Number(m.value), jd = Number(d.value);
+    if (jd > _jalaliDaysInMonth(jy, jm)) return null;
+    const [gy, gm, gd] = jalaliToGregorian(jy, jm, jd);
+    return new Date(gy, gm - 1, gd, 12, 0, 0).toISOString();
+};
+
+// دیالوگ آماده: تاریخ شمسی + میانبرها → ISO یا null (انصراف)
+window.promptDueDate = async function(title, confirmText) {
+    const r = await Swal.fire({
+        title: title || 'مهلت بازپرداخت؟',
+        html: '<div id="due-picker-swal"></div>',
+        didOpen: () => renderJalaliPicker('due-picker-swal', 60),
+        showCancelButton: true,
+        confirmButtonText: confirmText || 'تایید',
+        cancelButtonText: 'انصراف',
+        customClass: { popup: 'rounded-[2.5rem]' },
+        preConfirm: () => {
+            const iso = getJalaliPickerISO('due-picker-swal');
+            if (!iso) { Swal.showValidationMessage('تاریخ نامعتبر است'); return false; }
+            return iso;
+        }
+    });
+    return r.isConfirmed ? r.value : null;
+};
+
+// پیش‌نمایش خالصِ واردشده به صندوق (کل آورده منهای بدهی‌های فعلی)
+window.updateOpeningNetPreview = function() {
+    const el = document.getElementById('new-member-net-preview');
+    if (!el) return;
+    const total = parseFloat(document.getElementById('new-member-initial').value) || 0;
+    const loan = parseFloat(document.getElementById('new-member-debt-loan').value) || 0;
+    const emg = parseFloat(document.getElementById('new-member-debt-emergency').value) || 0;
+    if (loan + emg <= 0) { el.classList.add('hidden'); return; }
+    const net = total - loan - emg;
+    el.classList.remove('hidden');
+    el.className = 'text-[10px] font-black text-center ' + (net < 0 ? 'text-rose-600' : 'text-emerald-600');
+    el.innerText = net < 0 ? 'بدهی از کل آورده بیشتر است ❌' : `خالص وارد صندوق: ${net.toLocaleString()} ت`;
 };
 
 window.addNewMember = async function() {
@@ -2894,12 +3108,27 @@ window.addNewMember = async function() {
     const shares = parseInt(document.getElementById('new-member-shares').value);
     const initialAmount = parseFloat(document.getElementById('new-member-initial').value) || 0;
     const investCheck = document.getElementById('new-member-invest-check').checked;
+    const debtLoan = parseFloat(document.getElementById('new-member-debt-loan').value) || 0;
+    const debtEmergency = parseFloat(document.getElementById('new-member-debt-emergency').value) || 0;
+    const emergencyDueISO = getJalaliPickerISO('new-member-debt-emergency-due-picker');
+    const totalDebt = debtLoan + debtEmergency;
 
     // ✅ VALIDATION قوی‌تر
     if (!name) return Swal.fire({text: "نام و نام خانوادگی الزامی است", icon:'warning'});
     if (!mobile || mobile.length < 11) return Swal.fire({text: "شماره موبایل صحیح وارد کنید (09...)", icon:'warning'});
     if (!pass || pass.length < 6) return Swal.fire({text: "رمز عبور حداقل ۶ رقم باشد", icon:'warning'});
     
+    // ✅ اعتبارسنجی بدهی‌های اولیه
+    if (initialAmount < 0 || debtLoan < 0 || debtEmergency < 0) {
+        return Swal.fire({text: "مبالغ نمی‌تواند منفی باشد", icon:'warning'});
+    }
+    if (totalDebt > initialAmount) {
+        return Swal.fire({text: "مجموع بدهی‌ها نمی‌تواند از کل آورده‌ی عضو بیشتر باشد", icon:'warning'});
+    }
+    if (debtEmergency > 0 && !emergencyDueISO) {
+        return Swal.fire({text: "برای بدهی مساعده، تاریخ سررسید را وارد کنید", icon:'warning'});
+    }
+
     // ✅ شرط سهم: حتماً باید عدد باشد و حداقل ۱
     if (isNaN(shares) || shares < 1) {
         return Swal.fire({text: "تعداد سهم باید حداقل ۱ باشد", icon:'warning'});
@@ -2938,33 +3167,52 @@ window.addNewMember = async function() {
             total_shares: shares, // ✅ دقیقاً همون عددی که مدیر وارد کرده
             is_admin: false,
             credit_score: 100,
-            eligible_at: new Date().toISOString()
+            // عضو دارای بدهی وام نوبتی وارد صف وام نمی‌شود (بعد از تسویه، خودکار وارد صف می‌شود)
+            eligible_at: debtLoan > 0 ? null : new Date().toISOString(),
+            debt_target: totalDebt,
+            emergency_due_date: debtEmergency > 0 ? emergencyDueISO : null
         }]);
         if (dbErr) throw dbErr;
 
-        // ثبت تراکنش اولیه
+        // ثبت تراکنش‌های اولیه: آورده‌ی کل (دسته‌ی opening) + هر بدهی به‌صورت برداشت هم‌دسته
+        // نتیجه: موجودی صندوق = کل آورده − بدهی‌ها، و بدهی فقط با بازپرداخت واقعی کم می‌شود
         if (initialAmount > 0) {
             const { data: settings } = await supabaseClient
                 .from('settings')
                 .select('investment_percent')
                 .eq('pool_id', poolId)
                 .maybeSingle();
-            
+
             const investPercent = settings ? Number(settings.investment_percent) : 0;
+            const netCash = initialAmount - totalDebt; // پولی که واقعاً در صندوق می‌ماند
             let investVal = 0;
             if (investCheck && investPercent > 0) {
-                investVal = Math.floor((initialAmount * investPercent) / 100);
+                investVal = Math.floor((netCash * investPercent) / 100);
             }
 
-            const { error: txErr } = await supabaseClient.from('transactions').insert([{
+            const rows = [{
                 pool_id: poolId,
                 member_id: authData.user.id,
                 amount: initialAmount,
                 status: 'approved',
                 type: 'in',
+                category: 'opening',
                 invest_val: investVal,
                 receipt_url: `ثبت اولیه عضو: ${name}`
-            }]);
+            }];
+            if (debtLoan > 0) rows.push({
+                pool_id: poolId, member_id: authData.user.id, amount: debtLoan,
+                status: 'approved', type: 'out', category: 'monthly',
+                receipt_url: `بدهی اولیه (وام نوبتی): ${name}`
+            });
+            if (debtEmergency > 0) rows.push({
+                pool_id: poolId, member_id: authData.user.id, amount: debtEmergency,
+                status: 'approved', type: 'out', category: 'emergency',
+                receipt_url: `بدهی اولیه (مساعده): ${name}`
+            });
+
+            // یک insert واحد: یا همه ثبت می‌شوند یا هیچ‌کدام
+            const { error: txErr } = await supabaseClient.from('transactions').insert(rows);
             if (txErr) throw txErr;
         }
 
@@ -3884,6 +4132,7 @@ window.payStandardLoan = async function(memberId, memberName) {
         .eq('status', 'approved')
         .eq('type', 'out')
         .eq('category', 'monthly')
+        .not('receipt_url', 'like', 'بدهی اولیه%') // بدهی انتقالی وام پرداخت‌شده‌ی این ماه نیست
         .gte('created_at', firstDayOfThisMonth)
         .limit(1);
 
@@ -4342,7 +4591,8 @@ async function loadPendingReceipts(poolId) {
                 monthly: { label: 'قسط ماهانه', cls: 'bg-indigo-50 text-indigo-600' },
                 emergency: { label: 'مساعده', cls: 'bg-amber-50 text-amber-600' },
                 coin_assistance: { label: 'مساعده سکه‌ای', cls: 'bg-yellow-50 text-yellow-600' },
-                charity: { label: 'خیریه', cls: 'bg-emerald-50 text-emerald-600' }
+                charity: { label: 'خیریه', cls: 'bg-emerald-50 text-emerald-600' },
+                opening: { label: 'آورده‌ی اولیه', cls: 'bg-slate-100 text-slate-600' }
             }[t.category] || { label: 'نامشخص', cls: 'bg-slate-100 text-slate-500' };
 
             return `
@@ -4619,34 +4869,9 @@ window.payEmergencyLoan = async function(loanId, amount, memberName, memberId) {
 
     if (!result.isConfirmed) return;
 
-    // مهلت بازپرداخت رو از مدیر می‌پرسیم (مدل توافق‌شده: بدون قسط ثابت، فقط سررسید)
-    const dueResult = await Swal.fire({
-        title: 'مهلت بازپرداخت؟',
-        input: 'select',
-        inputOptions: { '30': '۳۰ روز', '60': '۶۰ روز', '90': '۹۰ روز', 'custom': 'تاریخ دلخواه' },
-        inputValue: '60',
-        showCancelButton: true,
-        confirmButtonText: 'تایید',
-        cancelButtonText: 'انصراف',
-        customClass: { popup: 'rounded-[2.5rem]' }
-    });
-    if (!dueResult.isConfirmed) return;
-
-    let dueDate;
-    if (dueResult.value === 'custom') {
-        const dateResult = await Swal.fire({
-            title: 'تاریخ سررسید را وارد کنید',
-            input: 'date',
-            inputValue: new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10),
-            showCancelButton: true,
-            confirmButtonText: 'تایید',
-            cancelButtonText: 'انصراف'
-        });
-        if (!dateResult.isConfirmed || !dateResult.value) return;
-        dueDate = new Date(dateResult.value).toISOString();
-    } else {
-        dueDate = new Date(Date.now() + Number(dueResult.value) * 86400000).toISOString();
-    }
+    // مهلت بازپرداخت رو از مدیر می‌پرسیم (تاریخ شمسی + میانبر ۳۰/۶۰/۹۰ روز)
+    const dueDate = await promptDueDate('مهلت بازپرداخت؟', 'تایید');
+    if (!dueDate) return;
 
     // چک موجودی صندوق اصلی قبل از هر برداشتی
     const balances = await getCurrentFundBalances(poolId);

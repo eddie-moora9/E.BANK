@@ -1165,8 +1165,26 @@
 
             <!-- مبلغ اولیه (جدید) -->
             <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                <label class="text-[8px] text-indigo-500 font-black block mb-1 uppercase">مبلغ اولیه (تومان)</label>
-                <input type="number" id="new-member-initial" placeholder="مبلغ اولیه" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm text-right">
+                <label class="text-[8px] text-indigo-500 font-black block mb-1 uppercase">کل آورده‌ی عضو در بانک سنتی (تومان)</label>
+                <input type="number" id="new-member-initial" placeholder="کل آورده (بدون کسر بدهی)" oninput="updateOpeningNetPreview()" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm text-right">
+            </div>
+
+            <!-- بدهی‌های فعلی عضو (انتقالی از بانک سنتی) -->
+            <div class="bg-amber-50/60 p-3 rounded-2xl border border-amber-100 space-y-2">
+                <p class="text-[9px] text-amber-700 font-black">بدهی‌های فعلی عضو (اختیاری)</p>
+                <div class="bg-white p-3 rounded-xl border border-amber-100">
+                    <label class="text-[8px] text-amber-600 font-black block mb-1">بدهی وام نوبتی (تومان)</label>
+                    <input type="number" id="new-member-debt-loan" placeholder="۰" oninput="updateOpeningNetPreview()" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm text-right">
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-amber-100">
+                    <label class="text-[8px] text-amber-600 font-black block mb-1">بدهی مساعده (تومان)</label>
+                    <input type="number" id="new-member-debt-emergency" placeholder="۰" oninput="updateOpeningNetPreview()" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm text-right">
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-amber-100">
+                    <label class="text-[8px] text-amber-600 font-black block mb-1">سررسید بازپرداخت مساعده — شمسی (فقط اگر بدهی مساعده دارد)</label>
+                    <div id="new-member-debt-emergency-due-picker"></div>
+                </div>
+                <p id="new-member-net-preview" class="text-[10px] font-black text-slate-500 text-center hidden"></p>
             </div>
 
             <!-- چک‌باکس کسر درصد سرمایه‌گذاری -->
@@ -1664,7 +1682,7 @@
 
             <!-- فیلد مبلغ اولیه (غیرفعال) -->
             <div class="bg-slate-50 p-3 rounded-2xl border border-slate-100 opacity-60">
-                <label class="text-[8px] text-indigo-500 font-black block mb-1 uppercase">مبلغ اولیه (ثبت شده)</label>
+                <label class="text-[8px] text-indigo-500 font-black block mb-1 uppercase">کل آورده‌ی اولیه (ثبت شده)</label>
                 <input type="number" id="edit-member-initial" disabled class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm text-right">
             </div>
 
@@ -1672,6 +1690,15 @@
             <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-2xl opacity-60">
                 <input type="checkbox" id="edit-member-invest-check" disabled class="w-5 h-5 accent-indigo-600 rounded-lg">
                 <label class="text-[11px] font-black text-slate-600">کسر درصد سرمایه‌گذاری (ثبت شده)</label>
+            </div>
+
+            <!-- بدهی اولیه (فقط نمایش) + اصلاح -->
+            <div class="bg-amber-50/60 p-3 rounded-2xl border border-amber-100 flex items-center justify-between gap-2">
+                <div class="text-right">
+                    <p class="text-[8px] text-amber-600 font-black uppercase">بدهی اولیه (ثبت شده)</p>
+                    <p id="edit-member-opening-debt" class="text-sm font-black text-slate-800">۰ ت</p>
+                </div>
+                <button type="button" onclick="adjustOpeningDebt()" class="bg-amber-500 text-white px-3 py-2 rounded-xl text-[10px] font-black active:scale-95">اصلاح بدهی</button>
             </div>
 
             <!-- تیک مدیریت -->
