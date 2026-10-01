@@ -225,10 +225,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        // ۴. نمایش نام کاربر در هدر
-        const userName = sessionStorage.getItem('user_name');
-        const nameDisplay = document.getElementById('user-name-display');
-        if (nameDisplay) nameDisplay.innerText = userName || "کاربر گرامی";
+      
+      
+        
+        // 4. نمایش نام کاربر در هدر و همچنین در پشت کارت
+const userName = sessionStorage.getItem('user_name');
+const nameDisplay = document.getElementById('user-name-display');
+if (nameDisplay) nameDisplay.innerText = userName || "کاربر گرامی";
+
+// ست کردن اسم عضو در پشت کارت معنوی 👇
+const cardBackName = document.getElementById('card-back-user-name');
+if (cardBackName) cardBackName.innerText = userName || "عزیز";
 
         // ۴.۵ اگه از پنل مدیر جابجا شدیم، دکمه‌ی بازگشت به پنل مدیر رو نشون بده
         const returnAdminBtn = document.getElementById('return-to-admin-btn');
@@ -289,33 +296,44 @@ document.addEventListener('DOMContentLoaded', async () => {
 /************************************************
  * ۳. محاسبات مالی هوشمند
  ************************************************/
+
 async function loadUserFinancials(userId, poolId) {
     try {
-        // ۱. دریافت مبالغ تنظیم شده از دیتابیس
+        // ۱. دریافت مبالغ تنظیم شده با پیش‌فرض صفر
         const { data: settings } = await supabaseClient.from('settings').select('*').eq('pool_id', poolId).maybeSingle();
-        const basePrice = settings ? Number(settings.base_amount) : 2000000;
-        const wonPrice = settings ? Number(settings.won_amount) : 2500000;
+        const basePrice = Number(settings?.base_amount ?? 0);
+        const wonPrice = Number(settings?.won_amount ?? 0);
 
-        // ۲. دریافت اطلاعات عضو
-        const { data: user } = await supabaseClient.from('members').select('*').eq('id', userId).single();
+        // ۲. دریافت اطلاعات عضو و وضعیت بدهی وام نوبتی
+        const [{ data: user }, debts] = await Promise.all([
+            supabaseClient.from('members').select('*').eq('id', userId).single(),
+            getMemberDebtSummary(userId, poolId)
+        ]);
         
         if (user) {
-            const won = user.won_shares || 0;
-            const active = (user.total_shares || 1) - won;
+            const totalShares = Number(user.total_shares) || 1;
+            const hasActiveLoan = debts.monthlyLoanDebt > 0;
             
-            // محاسبه مبلغ قسط این ماه
-            const monthlyDue = (won * wonPrice) + (active * basePrice);
+            // اگر عضو وام نوبتی فعال دارد، قسط برنده و در غیر این صورت قسط ثابت محاسبه می‌شود
+            const singleShareDue = hasActiveLoan ? (wonPrice > 0 ? wonPrice : basePrice) : basePrice;
+            const monthlyDue = totalShares * singleShareDue;
 
-            // نمایش مبلغ قسط در کارت سفید پایین 👇
-            document.getElementById('amount-display').innerText = monthlyDue.toLocaleString() + ' تومان';
+            // نمایش در کارت
+            const amountEl = document.getElementById('amount-display');
+            if (amountEl) amountEl.innerText = monthlyDue.toLocaleString() + ' تومان';
             
-            // نمایش وضعیت سهم‌ها
-            document.getElementById('status-badge').innerText = `وضعیت: ${user.total_shares} سهم (${won} برنده)`;
+            const badgeEl = document.getElementById('status-badge');
+            if (badgeEl) {
+                badgeEl.innerText = hasActiveLoan 
+                    ? `وضعیت: ${totalShares} سهم (در حال بازپرداخت وام)` 
+                    : `وضعیت: ${totalShares} سهم عادی`;
+            }
         }
     } catch (e) { 
         console.error("خطا در لود مالی:", e); 
     }
-}   
+}
+
 async function calculateMyTotalDeposits(userId, poolId) {
     const { data } = await supabaseClient.from('transactions').select('amount, category').eq('member_id', userId).eq('pool_id', poolId).eq('status', 'approved').eq('type', 'in');
     // خیریه پس‌اندازِ شخصی عضو نیست، و مساعده/مساعده‌سکه‌ای هم فقط بازپرداخت بدهیه نه پس‌انداز جدید — پس نباید تو موجودی کل حساب بشن
@@ -326,7 +344,16 @@ async function calculateMyTotalDeposits(userId, poolId) {
 }
 
 async function calculateUserTotalProfit(userId, poolId) {
-    const { data } = await supabaseClient.from('transactions').select('amount').eq('member_id', userId).eq('pool_id', poolId).eq('status', 'approved').eq('receipt_url', 'سود پروژه');
+    // جستجوی هر تراکنش ورودی که شامل کلمه "سود" باشد
+    const { data } = await supabaseClient
+        .from('transactions')
+        .select('amount')
+        .eq('member_id', userId)
+        .eq('pool_id', poolId)
+        .eq('status', 'approved')
+        .eq('type', 'in')
+        .ilike('receipt_url', '%سود%');
+
     const total = data ? data.reduce((s, i) => s + Number(i.amount), 0) : 0;
     const el = document.getElementById('user-total-profit');
     if (el) el.innerText = total.toLocaleString() + ' ت';
@@ -2171,6 +2198,7 @@ function buildCoinPreviewMessage({ rawChange, peak, perDay }) {
 }
 
 // ۱. باز کردن کشو: نمایش مرحله‌ی «قصد انجام چه کاری دارید؟»
+// باز کردن کشوی پرداخت و محاسبه هوشمند مبلغ قابل پرداخت
 window.openDepositDrawer = async function() {
     const drawer = document.getElementById('deposit-drawer');
     if (!drawer) return;
@@ -2178,7 +2206,6 @@ window.openDepositDrawer = async function() {
     drawer.classList.remove('hidden');
     if (window.navigator.vibrate) window.navigator.vibrate(20);
 
-    // بازگشت به مرحله‌ی انتخاب دسته هر بار که کشو باز میشه
     document.getElementById('drawer-step-1')?.classList.remove('hidden');
     document.getElementById('drawer-step-2')?.classList.add('hidden');
     selectedPaymentCategory = null;
@@ -2189,26 +2216,46 @@ window.openDepositDrawer = async function() {
         const userId = session.user.id;
         const poolId = sessionStorage.getItem('pool_id');
 
-        // ۱. مبلغ قسط ماهانه (همون مبلغی که همیشه در کارت «قسط این ماه» نشون داده میشه)
-        const monthlyDue = (document.getElementById('amount-display')?.innerText || '').replace(/[^0-9]/g, '');
+        // دریافت اطلاعات کاربر (تعداد سهام) و تنظیمات صندوق
+        const [{ data: user }, { data: settings }, debts, { data: mData }] = await Promise.all([
+            supabaseClient.from('members').select('total_shares').eq('id', userId).single(),
+            supabaseClient.from('settings').select('base_amount, won_amount, coin_per_day, coin_window_days, coin_charity_rate').eq('pool_id', poolId).maybeSingle(),
+            getMemberDebtSummary(userId, poolId),
+            supabaseClient.from('members').select('emergency_due_date, coin_assistance_due_date').eq('id', userId).maybeSingle()
+        ]);
+
+        const totalShares = Number(user?.total_shares) || 1;
+        const basePrice = (Number(settings?.base_amount) || 0) * totalShares; // مبلغ ثابت بر اساس تعداد سهم
+        const wonPrice = Number(settings?.won_amount) || 0;                   // سقف قسط بازپرداخت
+        const loanDebt = Number(debts.monthlyLoanDebt) || 0;                  // مانده کل بدهی وام
+
+        // محاسبه داینامیک سهم بازپرداخت وام (تا سقف wonPrice یا به اندازه مانده بدهی)
+        let autoRepayPortion = 0;
+        if (loanDebt > 0 && wonPrice > 0) {
+            autoRepayPortion = Math.min(wonPrice, loanDebt);
+        }
+
+        // کل مبلغی که باید این ماه واریز کند (ثابت + بازپرداخت وام)
+        const totalMonthlyDue = basePrice + autoRepayPortion;
+
+        // نمایش در مرحله ۱ روی دکمه «وام ماهانه»
         const monthlyEl = document.getElementById('pay-amount-monthly');
-        if (monthlyEl) monthlyEl.innerText = (Number(monthlyDue) || 0).toLocaleString() + ' ت';
+        if (monthlyEl) monthlyEl.innerText = totalMonthlyDue.toLocaleString() + ' ت';
 
-        // ۲. بدهی مساعده و مساعده‌ی سکه‌ای (فقط اگه بدهی داشته باشه نشون داده میشه)
-        const debts = await getMemberDebtSummary(userId, poolId);
-        const emergencyBtn = document.getElementById('pay-option-emergency');
-        const coinAssistBtn = document.getElementById('pay-option-coin_assistance');
-
-        // مانده‌ی کل وام نوبتی، به‌عنوان زیرنویس زیر مبلغ قسط ماهانه
+        // زیرنویس مانده کل وام
         const totalMonthlyEl = document.getElementById('pay-total-monthly');
         if (totalMonthlyEl) {
-            if (debts.monthlyLoanDebt > 0) {
-                totalMonthlyEl.innerText = 'مانده کل: ' + debts.monthlyLoanDebt.toLocaleString() + ' ت';
+            if (loanDebt > 0) {
+                totalMonthlyEl.innerText = `مانده کل وام: ${loanDebt.toLocaleString()} ت`;
                 totalMonthlyEl.classList.remove('hidden');
             } else {
                 totalMonthlyEl.classList.add('hidden');
             }
         }
+
+        // مساعده و مساعده سکه‌ای
+        const emergencyBtn = document.getElementById('pay-option-emergency');
+        const coinAssistBtn = document.getElementById('pay-option-coin_assistance');
 
         if (debts.emergency > 0) {
             document.getElementById('pay-amount-emergency').innerText = debts.emergency.toLocaleString() + ' ت';
@@ -2224,41 +2271,12 @@ window.openDepositDrawer = async function() {
             coinAssistBtn?.classList.add('hidden');
         }
 
-        // سررسید مساعده/مساعده‌سکه‌ای (زیرنویس زیر مبلغ هر کدوم)
-        const { data: mData } = await supabaseClient
-            .from('members')
-            .select('emergency_due_date, coin_assistance_due_date')
-            .eq('id', userId)
-            .maybeSingle();
-
-        const dueSubtitle = (dueDateStr) => {
-            if (!dueDateStr) return '';
-            const daysLeft = Math.ceil((new Date(dueDateStr) - new Date()) / 86400000);
-            return daysLeft < 0 ? `⚠️ ${Math.abs(daysLeft)} روز معوقه` : `${daysLeft} روز تا سررسید`;
-        };
-        const emergencyDueEl = document.getElementById('pay-due-emergency');
-        if (emergencyDueEl) {
-            const t = dueSubtitle(mData?.emergency_due_date);
-            emergencyDueEl.innerText = t;
-            emergencyDueEl.classList.toggle('hidden', !t || debts.emergency <= 0);
-        }
-        const coinAssistDueEl = document.getElementById('pay-due-coin_assistance');
-        if (coinAssistDueEl) {
-            const t = dueSubtitle(mData?.coin_assistance_due_date);
-            coinAssistDueEl.innerText = t;
-            coinAssistDueEl.classList.toggle('hidden', !t || debts.coin_assistance <= 0);
-        }
-
-        // ۳. تنظیمات صندوق (نرخ سکه‌ها) برای استفاده در مرحله‌ی بعد
-        const { data: settings } = await supabaseClient
-            .from('settings')
-            .select('coin_per_day, coin_window_days, coin_charity_rate')
-            .eq('pool_id', poolId)
-            .maybeSingle();
-
+        // ذخیره کش با تمام محاسبات انجام شده
         paymentModalCache = {
-            monthlyDue: Number(monthlyDue) || 0,
-            monthlyLoanDebt: debts.monthlyLoanDebt,
+            totalMonthlyDue: totalMonthlyDue,
+            basePrice: basePrice,
+            autoRepayPortion: autoRepayPortion,
+            monthlyLoanDebt: loanDebt,
             emergencyDebt: debts.emergency,
             coinAssistDebt: debts.coin_assistance,
             emergencyDueDate: mData?.emergency_due_date || null,
@@ -2273,7 +2291,8 @@ window.openDepositDrawer = async function() {
     }
 };
 
-// ۲. انتخاب دسته‌ی پرداخت و رفتن به مرحله‌ی فرم
+// انتخاب دسته‌ی پرداخت و تفکیک خودکار قسط پایه و بازپرداخت وام
+// رفتن به فرم پرداخت با تفکیک خودکار و هوشمند مبالغ
 window.selectPaymentCategory = function(category) {
     if (!paymentModalCache) return;
     selectedPaymentCategory = category;
@@ -2282,63 +2301,69 @@ window.selectPaymentCategory = function(category) {
     document.getElementById('drawer-step-2')?.classList.remove('hidden');
 
     const titleEl = document.getElementById('drawer-step-2-title');
+    const labelEl = document.getElementById('receipt-amount-label');
     const amountInput = document.getElementById('receipt-amount-input');
+    const repayInput = document.getElementById('loan-repay-input');
+    const repayWrap = document.getElementById('loan-repay-wrap');
     const coinMsgEl = document.getElementById('coin-preview-msg');
 
     const labels = {
-        monthly: 'وام ماهانه',
+        monthly: 'قسط ماهانه و بازپرداخت وام',
         emergency: 'مساعده',
         coin_assistance: 'مساعده تبدیل سکه',
-        charity: 'خیریه'
+        charity: 'کمک به خیریه'
     };
     if (titleEl) titleEl.innerText = 'پرداخت: ' + (labels[category] || '');
 
-    // بازپرداخت وام: فقط در پرداخت ماهانه و فقط اگر عضو مانده‌ی وام دارد
-    const repayWrap = document.getElementById('loan-repay-wrap');
-    const repayInput = document.getElementById('loan-repay-input');
-    if (repayInput) repayInput.value = '';
-    if (repayWrap) {
-        const debt = Number(paymentModalCache.monthlyLoanDebt) || 0;
-        repayWrap.classList.toggle('hidden', !(category === 'monthly' && debt > 0));
-        const hint = document.getElementById('loan-repay-hint');
-        if (hint) hint.innerText = 'مانده وام: ' + debt.toLocaleString() + ' ت';
+    // تغییر نام لیبل اینپوت اول متناسب با کار
+    if (labelEl) {
+        if (category === 'monthly') labelEl.innerText = 'مبلغ ثابت ماهانه (سپرده شما)';
+        else if (category === 'emergency') labelEl.innerText = 'مبلغ بازپرداخت مساعده';
+        else if (category === 'coin_assistance') labelEl.innerText = 'مبلغ بازپرداخت مساعده سکه‌ای';
+        else if (category === 'charity') labelEl.innerText = 'مبلغ کمک داوطلبانه به خیریه';
     }
 
-    // پر کردن مبلغ پیش‌فرض بر اساس دسته
-    if (amountInput) {
-        if (category === 'monthly') amountInput.value = paymentModalCache.monthlyDue || '';
-        else if (category === 'emergency') amountInput.value = paymentModalCache.emergencyDebt || '';
-        else if (category === 'coin_assistance') amountInput.value = paymentModalCache.coinAssistDebt || '';
-        else amountInput.value = ''; // خیریه: آزاد
+    if (category === 'monthly') {
+        const basePortion = paymentModalCache.basePrice;
+        const repayPortion = paymentModalCache.autoRepayPortion;
+        const loanDebt = paymentModalCache.monthlyLoanDebt;
 
-        // پلیس‌هولدر مخصوص خیریه (نرخ تبدیل از دیتابیس)
-        if (category === 'charity') {
-            amountInput.placeholder = `هر ${Number(paymentModalCache.coinCharityRate).toLocaleString()} تومان = ۱ سکه`;
+        amountInput.value = basePortion || '';
+
+        if (repayPortion > 0) {
+            repayInput.value = repayPortion;
+            repayWrap.classList.remove('hidden');
+            const hintEl = document.getElementById('loan-repay-hint');
+            if (hintEl) hintEl.innerText = `کسر از اصل وام (مانده: ${loanDebt.toLocaleString()} ت)`;
         } else {
-            amountInput.placeholder = 'مبلغ واریزی به تومان';
+            repayInput.value = '';
+            repayWrap.classList.add('hidden');
         }
+    } else {
+        repayWrap.classList.add('hidden');
+        if (category === 'emergency') amountInput.value = paymentModalCache.emergencyDebt || '';
+        else if (category === 'coin_assistance') amountInput.value = paymentModalCache.coinAssistDebt || '';
+        else amountInput.value = '';
     }
 
-    // پیام انگیزشی سکه (فقط برای دسته‌های غیر از خیریه)
+    // مدیریت دقیق پیام سکه
     if (coinMsgEl) {
         if (category === 'charity') {
-            coinMsgEl.classList.add('hidden');
+            // پاداش سکه خیریه بر اساس نرخ تنظیم‌شده در پنل مدیر
+            const rate = Number(paymentModalCache.coinCharityRate) || 10000;
+            coinMsgEl.className = 'mb-4 p-3.5 rounded-2xl text-[10px] font-black leading-relaxed text-center bg-emerald-50 text-emerald-800 border border-emerald-100';
+            coinMsgEl.innerHTML = `🎗️ دست خیر شما پربرکت باد: به ازای هر <b>${rate.toLocaleString()} تومان</b> کمک، ۱ سکه پاداش بگیرید.`;
+            coinMsgEl.classList.remove('hidden');
         } else {
-            let calc;
-            if (category === 'emergency') {
-                calc = calculateCoinChangeByDueDate(paymentModalCache.emergencyDueDate, paymentModalCache.coinPerDay, paymentModalCache.coinWindowDays);
-            } else if (category === 'coin_assistance') {
-                calc = calculateCoinChangeByDueDate(paymentModalCache.coinAssistDueDate, paymentModalCache.coinPerDay, paymentModalCache.coinWindowDays);
-            } else {
-                calc = calculateTodayCoinChange(paymentModalCache.coinPerDay, paymentModalCache.coinWindowDays);
-            }
+            const calc = (category === 'emergency' || category === 'coin_assistance')
+                ? calculateCoinChangeByDueDate(paymentModalCache.emergencyDueDate, paymentModalCache.coinPerDay, paymentModalCache.coinWindowDays)
+                : calculateTodayCoinChange(paymentModalCache.coinPerDay, paymentModalCache.coinWindowDays);
             const msg = buildCoinPreviewMessage(calc);
-            coinMsgEl.className = 'mb-5 p-4 rounded-[1.8rem] text-[10px] font-black leading-relaxed text-center ' + msg.cls;
+            coinMsgEl.className = 'mb-4 p-3.5 rounded-2xl text-[10px] font-black leading-relaxed text-center ' + msg.cls;
             coinMsgEl.innerHTML = msg.html;
+            coinMsgEl.classList.remove('hidden');
         }
     }
-
-    if (window.navigator.vibrate) window.navigator.vibrate(15);
 };
 
 // ۳. بازگشت از فرم پرداخت به مرحله‌ی انتخاب دسته

@@ -740,79 +740,136 @@ window.updateMember = async function() {
 
 
 /************************************************
- * تابع حذف ریشه‌ای عضو (Auth + Database)
+ * تابع تراز، تسویه حساب و حذف قطعی عضو
  ************************************************/
 window.handleDeleteWithSettlement = async function() {
     const m = selectedMemberForReport;
-    const balance = m.finalBalance || 0;
+    if (!m) return Swal.fire({ text: "عضوی انتخاب نشده است!", icon: 'warning' });
+
+    const poolId = sessionStorage.getItem('pool_id');
+    const balance = Number(m.finalBalance || 0);
     const absBalance = Math.abs(balance);
 
-    // پیام تایید هوشمند بر اساس تراز
-    let warningText = "";
-    if (balance > 0) warningText = `عضو مبلغ <b>${absBalance.toLocaleString()} ت</b> پس‌انداز دارد. آیا مطمئنید که تسویه انجام شده و می‌خواهید او را حذف کنید؟`;
-    else if (balance < 0) warningText = `عضو مبلغ <b>${absBalance.toLocaleString()} ت</b> بدهکار است. آیا تایید می‌کنید که این بدهی را وصول کرده‌اید؟`;
-    else warningText = `حساب عضو صفر است. آیا از حذف نهایی اطمینان دارید؟`;
+    // ۱. آماده‌سازی پیام و جزئیات تسویه
+    let statusText = "";
+    if (balance > 0) {
+        statusText = `این عضو مبلغ <b style="color:#059669">${absBalance.toLocaleString()} تومان</b> از صندوق <b style="color:#059669">طلبکار (پس‌انداز)</b> است.<br>با تایید، این مبلغ از صندوق خارج می‌شود.`;
+    } else if (balance < 0) {
+        statusText = `این عضو مبلغ <b style="color:#e11d48">${absBalance.toLocaleString()} تومان</b> به صندوق <b style="color:#e11d48">بدهکار</b> است.<br>با تایید، دریافت این بدهی در صندوق ثبت می‌شود.`;
+    } else {
+        statusText = `حساب این عضو با صندوق <b style="color:#4f46e5">کاملاً صفر و تسویه</b> است.`;
+    }
 
+    const htmlPrompt = `
+        <div style="font-size:12px; line-height:2.2; color:#334155; text-align:right;">
+            <p>برای اینکه عضو را حذف کنید باید با او تسویه حساب کنید.</p>
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:12px; border-radius:18px; margin:10px 0;">
+                ${statusText}
+            </div>
+            ${absBalance > 0 ? `<p style="font-size:11px; color:#64748b; font-weight:800;">برای تایید، دقیقاً مبلغ تسویه (<b style="color:#0f172a">${absBalance}</b>) را در کادر زیر وارد کنید:</p>` : '<p style="font-size:11px; color:#64748b;">برای تایید، دکمه حذف را بزنید.</p>'}
+        </div>
+    `;
+
+    // ۲. دریافت تاییدیه با درج اجباری مبلغ تسویه
     const result = await Swal.fire({
-        title: 'تایید تسویه و حذف',
-        html: `<p style="font-size:12px; color:#475569; line-height:1.9;">${warningText}</p>` +
-              (absBalance > 0 ? `<p style="font-size:9px; color:#94a3b8; margin-top:8px;">برای تایید، همین مبلغ را در کادر زیر وارد کنید</p>` : ''),
+        title: 'تسویه حساب و حذف عضو',
+        html: htmlPrompt,
         icon: 'warning',
         input: absBalance > 0 ? 'number' : undefined,
         inputPlaceholder: absBalance > 0 ? `مثلاً ${absBalance}` : undefined,
         showCancelButton: true,
-        confirmButtonColor: '#ef4444',
-        confirmButtonText: 'بله، تسویه شد و حذف کن',
+        confirmButtonColor: '#e11d48',
+        confirmButtonText: 'تایید تسویه و حذف قطعی',
         cancelButtonText: 'انصراف',
         customClass: { popup: 'rounded-[2.5rem]' },
-        inputValidator: (value) => {
-            if (absBalance > 0 && Number(value) !== absBalance) {
-                return 'مبلغ واردشده با تراز محاسبه‌شده مطابقت ندارد ❌';
+        inputValidator: (val) => {
+            if (absBalance > 0) {
+                if (!val || Number(val) !== absBalance) {
+                    return `مبلغ وارد شده باید دقیقاً برابر با ${absBalance.toLocaleString()} باشد! ❌`;
+                }
             }
         }
     });
 
-    if (result.isConfirmed) {
-        try {
-            const poolId = sessionStorage.getItem('pool_id');
+    if (!result.isConfirmed) return;
 
-            // چک موجودی صندوق اصلی قبل از هر برداشتی (فقط وقتی واقعاً از صندوق خارج میشه)
-            if (balance > 0) {
-                const balancesCheck = await getCurrentFundBalances(poolId);
-                if (absBalance > balancesCheck.mainFund) {
-                    return insufficientFundsAlert('صندوق اصلی', absBalance, balancesCheck.mainFund);
-                }
-            }
-
-            Swal.fire({ title: 'در حال تسویه نهایی...', didOpen: () => Swal.showLoading() });
-
-            // ۱. ثبت تراکنش تسویه برای اصلاح موجودی کل صندوق 👇
-            // اگر بستانکار بود، از صندوق کم می‌شود. اگر بدهکار بود، به صندوق اضافه می‌شود.
-            if (absBalance > 0) {
-                await supabaseClient.from('transactions').insert([{
-                    pool_id: poolId,
-                    amount: absBalance,
-                    status: 'approved',
-                    type: balance > 0 ? 'out' : 'in', // اگر پس‌اندازش را پس دادیم 'out'، اگر بدهی‌اش را گرفتیم 'in'
-                    category: 'monthly',
-                    receipt_url: `تسویه نهایی با عضو حذف شده: ${m.full_name}`
-                }]);
-            }
-
-            // ۲. حذف ریشه‌ای (Auth + Database) که قبلاً با RPC ساختیم
-            await supabaseClient.rpc('delete_user_from_auth', { target_user_id: m.id });
-            await supabaseClient.from('members').delete().eq('id', m.id);
-
-            await Swal.fire({ title: 'حذف و تسویه موفق ✅', text: 'حساب بسته شد و موجودی صندوق آپدیت گردید.', icon: 'success' });
-            
-            closeReportModal();
-            closeMemberProfile();
-            loadAllMembers(poolId);
-            calculateStats(poolId); // بروزرسانی موجودی کل پلتفرم
-
-        } catch (e) {
-            Swal.fire({ text: e.message, icon: 'error' });
+    // ۳. اگر طلبکار است، چک کنیم که صندوق پول کافی برای پرداخت دارد یا نه
+    if (balance > 0) {
+        const balancesCheck = await getCurrentFundBalances(poolId);
+        if (absBalance > balancesCheck.mainFund) {
+            return insufficientFundsAlert('صندوق اصلی', absBalance, balancesCheck.mainFund);
         }
+    }
+
+    Swal.fire({
+        title: 'در حال تسویه و حذف نهایی...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    try {
+        // الف) ثبت تراکنش تسویه در صندوق (اگر مبلغی وجود دارد)
+        if (absBalance > 0) {
+            const { error: txErr } = await supabaseClient.from('transactions').insert([{
+                pool_id: poolId,
+                amount: absBalance,
+                status: 'approved',
+                type: balance > 0 ? 'out' : 'in',
+                category: 'monthly',
+                receipt_url: `تسویه نهایی با عضو حذف شده: ${m.full_name}`
+            }]);
+            if (txErr) throw new Error("خطا در ثبت سند تسویه: " + txErr.message);
+        }
+
+        // ب) قطع وابستگی تراکنش‌های گذشته تا دیتابیس خطای Foreign Key ندهد
+        // (تراکنش‌های قبلی برای حفظ حسابداری در صندوق می‌مانند ولی ارتباط عضوی آنها قطع می‌شود)
+        await supabaseClient.from('transactions').update({ member_id: null }).eq('member_id', m.id);
+
+        // ج) پاک کردن سایر سوابق وابسته به این کاربر
+        await supabaseClient.from('loans').delete().eq('member_id', m.id);
+        await supabaseClient.from('coin_requests').delete().eq('member_id', m.id);
+        await supabaseClient.from('messages').delete().eq('sender_id', m.id);
+        await supabaseClient.from('poll_votes').delete().eq('member_id', m.id);
+        await supabaseClient.from('feedback_reports').delete().eq('member_id', m.id);
+
+        // د) حذف عضو از جدول members با بررسی قطعی خطا
+        const { error: delErr } = await supabaseClient.from('members').delete().eq('id', m.id);
+        if (delErr) throw new Error("خطا در حذف از دیتابیس: " + delErr.message);
+
+        // ه) حذف از احراز هویت Supabase Auth
+        try {
+            await supabaseClient.rpc('delete_user_from_auth', { target_user_id: m.id });
+        } catch (_) {}
+
+        // و) برگشت سهمیه سهام این عضو به ظرفیت صندوق
+        const sharesToReturn = Number(m.total_shares || 1);
+        await supabaseClient.rpc('increment_pool_capacity', { p_id: poolId, amount: sharesToReturn });
+
+        // ز) پیام موفقیت و رفرش آنی صفحه
+        await Swal.fire({
+            title: 'حذف و تسویه انجام شد ✅',
+            text: `عضو "${m.full_name}" با موفقیت تسویه و از سیستم حذف گردید.`,
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false,
+            customClass: { popup: 'rounded-[2rem]' }
+        });
+
+        // بستن پنجره‌ها و بارگذاری مجدد لیست
+        closeReportModal();
+        closeMemberProfile();
+        await loadAllMembers(poolId);
+        await calculateStats(poolId);
+        if (typeof updateCapacityDisplay === 'function') updateCapacityDisplay(poolId);
+
+    } catch (e) {
+        console.error("Delete Member Error:", e);
+        Swal.fire({
+            title: 'خطا در حذف عضو ❌',
+            text: e.message || 'مشکلی در ارتباط با دیتابیس پیش آمد.',
+            icon: 'error',
+            confirmButtonColor: '#e11d48'
+        });
     }
 };
 
@@ -1300,12 +1357,12 @@ window.openMyFeedbackReports = async function () {
 
 window.openDangerZoneReset = async function() {
     const step1 = await Swal.fire({
-        title: '⚠️ منطقه خطر',
-        html: `<p style="font-size:12px; line-height:1.9; color:#475569;">
-                 با این کار <b>همه‌ی</b> اعضا، تراکنش‌ها، وام‌ها، سکه‌ها، اخبار و نظرسنجی‌های این صندوق
-                 برای همیشه پاک میشن. فقط حساب خودِ شما (مدیر) با آمار صفرشده باقی می‌مونه.
+        title: '⚠️ منطقه خطر: بازگشت به نقطه صفر',
+        html: `<p style="font-size:12px; line-height:2.2; color:#475569;">
+                 با این کار تمام <b>اعضا</b>، <b>تراکنش‌ها</b>، <b>وام‌ها</b>، <b>پروژه‌ها</b>، <b>پیام‌ها</b> و <b>اخبار</b> صندوق برای همیشه پاک می‌شوند و صندوق به حالت تازه تأسیس بازمی‌گردد.<br><br>
+                 <span style="color:#059669; font-weight:bold;">✅ اعتبار اشتراک و سهمیه‌های خریداری‌شده شما دست‌نخورده باقی می‌ماند.</span>
                </p>
-               <p style="font-size:10px; color:#e11d48; margin-top:10px; font-weight:900;">این عملیات غیرقابل بازگشته!</p>`,
+               <p style="font-size:10px; color:#e11d48; margin-top:10px; font-weight:900;">این عملیات غیرقابل بازگشت است!</p>`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'متوجه‌ام، ادامه بده',
@@ -1316,42 +1373,58 @@ window.openDangerZoneReset = async function() {
     if (!step1.isConfirmed) return;
 
     const step2 = await Swal.fire({
-        title: 'تایید هویت',
+        title: 'تایید هویت مدیر',
         input: 'password',
         inputPlaceholder: 'رمز عبور ورود به پنل مدیر',
-        text: 'برای تایید نهایی، رمز عبور اکانت خودتون رو وارد کنید',
-        confirmButtonText: 'ریست کن',
+        text: 'برای تایید نهایی ریست، رمز عبور اکانت مدیریت خود را وارد کنید:',
+        confirmButtonText: 'ریست کامل صندوق',
         cancelButtonText: 'انصراف',
         showCancelButton: true,
         confirmButtonColor: '#e11d48',
-        customClass: { popup: 'rounded-[2.5rem]' }
+        customClass: { popup: 'rounded-[2.5rem]' },
+        inputValidator: (val) => {
+            if (!val) return 'رمز عبور الزامی است!';
+        }
     });
     if (!step2.isConfirmed || !step2.value) return;
 
-    Swal.fire({ title: 'در حال تایید رمز عبور...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+    Swal.fire({ title: 'در حال احراز هویت...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
 
     try {
         const { data: { user } } = await supabaseClient.auth.getUser();
-        if (!user?.email) throw new Error('نشست کاربری معتبر نیست، دوباره وارد شوید.');
+        if (!user?.email) throw new Error('نشست کاربری نامعتبر است، مجدداً وارد شوید.');
 
-        // تایید رمز از طریق ورود مجدد با همون ایمیل/رمز
+        // بررسی صحت رمز عبور مدیر
         const { error: authErr } = await supabaseClient.auth.signInWithPassword({
             email: user.email,
             password: step2.value
         });
-        if (authErr) throw new Error('رمز عبور اشتباه است ❌');
+        if (authErr) throw new Error('رمز عبور وارد شده اشتباه است ❌');
 
-        Swal.fire({ title: 'در حال ریست کامل صندوق...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+        Swal.fire({ title: 'در حال پاکسازی و ریست صندوق...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
 
+        // فراخوانی تابع SQL ریست
         const { data: ok, error } = await supabaseClient.rpc('danger_zone_reset_pool');
         if (error) throw error;
-        if (!ok) throw new Error('اجازه‌ی این عملیات رو ندارید.');
+        if (!ok) throw new Error('اجازه اجرای این عملیات را ندارید.');
 
-        await Swal.fire({ title: 'صندوق کامل ریست شد ✅', text: 'همه‌چیز از صفر شروع میشه.', icon: 'success', confirmButtonColor: '#10b981' });
+        await Swal.fire({
+            title: 'صندوق با موفقیت ریست شد ✅',
+            text: 'تمام اطلاعات پاک شدند و صندوق مانند روز اول صفر گردید.',
+            icon: 'success',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-[2.5rem]' }
+        });
+
         location.reload();
 
     } catch (e) {
-        Swal.fire({ title: 'خطا', text: e.message, icon: 'error' });
+        Swal.fire({
+            title: 'خطا در ریست صندوق ❌',
+            text: e.message,
+            icon: 'error',
+            confirmButtonColor: '#e11d48'
+        });
     }
 };
 
@@ -2302,10 +2375,11 @@ async function loadCurrentConfig(poolId) {
             const investInput = document.getElementById('set-invest-percent');
 
             // فقط اگر المان در صفحه وجود داشت، مقداردهی کن 👇
-            if (monthlyLoanInput) monthlyLoanInput.value = settings.monthly_loan_amount || 80000000;
-            if (baseInput) baseInput.value = settings.base_amount || 0; 
-            if (wonInput) wonInput.value = settings.won_amount || 0; 
-            if (investInput) investInput.value = settings.investment_percent || 0;
+          // کد اصلاح‌شده (پیش‌فرض ۰):
+if (monthlyLoanInput) monthlyLoanInput.value = settings.monthly_loan_amount ?? 0;
+if (baseInput) baseInput.value = settings.base_amount ?? 0; 
+if (wonInput) wonInput.value = settings.won_amount ?? 0; 
+if (investInput) investInput.value = settings.investment_percent ?? 0;
 
             const coinPerDayInput = document.getElementById('set-coin-per-day');
             const coinWindowInput = document.getElementById('set-coin-window-days');
@@ -4133,7 +4207,8 @@ window.payStandardLoan = async function(memberId, memberName) {
 
     // مبلغ پیش‌فرض رو از تنظیمات صندوق می‌گیریم، نه یه عدد ثابت
     const { data: loanSettings } = await supabaseClient.from('settings').select('monthly_loan_amount').eq('pool_id', poolId).maybeSingle();
-    const defaultLoanAmount = loanSettings?.monthly_loan_amount || 80000000;
+    // کد اصلاح‌شده (پیش‌فرض ۰):
+const defaultLoanAmount = loanSettings?.monthly_loan_amount ?? 0;
 
     // ۱. تایید مبلغ و عملیات
     const { value: amount } = await Swal.fire({

@@ -1303,7 +1303,7 @@
         <div class="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse"></div>
     </div>
 
-    <!-- گروه ۱: مبالغ و قسط‌ها -->
+  <!-- گروه ۱: تعرفه‌های مالی صندوق -->
     <div class="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
         <div onclick="toggleAccordion('set-group-1', 'icon-set-1')" class="flex justify-between items-center p-6 cursor-pointer active:bg-slate-50 transition-all">
             <div class="flex items-center gap-4">
@@ -1314,68 +1314,37 @@
         </div>
         <div id="set-group-1" class="max-h-0 overflow-hidden transition-all duration-500">
             <div class="p-6 pt-0 space-y-4">
-                <div class="bg-rose-50/50 p-4 rounded-2xl border border-rose-100">
-                    <label class="text-[8px] text-rose-600 font-black block mb-1 uppercase">Monthly Loan Amount</label>
-                    <input type="number" id="set-monthly-loan-amount" class="w-full bg-transparent border-none outline-none font-black text-rose-800 text-sm">
-                </div>
+                
+                <!-- ۱. اولی: مبلغ ثابت ماهانه -->
                 <div class="bg-slate-50 p-4 rounded-2xl border border-transparent focus-within:border-indigo-200 transition-all">
-                    <label class="text-[8px] text-slate-400 font-black block mb-1 uppercase">Standard Installment</label>
-                    <input type="number" id="set-base-amount" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
+                    <label class="text-[9px] text-slate-500 font-black block mb-1">مبلغ ثابت ماهانه (به ازای هر سهم)</label>
+                    <input type="number" id="set-base-amount" placeholder="مثلاً ۵۰۰,۰۰۰" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
                 </div>
-                <div class="bg-slate-50 p-4 rounded-2xl border border-transparent focus-within:border-indigo-200 transition-all">
-                    <label class="text-[8px] text-slate-400 font-black block mb-1 uppercase">Winner Installment</label>
-                    <input type="number" id="set-won-amount" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
-                </div>
-                <div class="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
-                    <label class="text-[8px] text-indigo-600 font-black block mb-1 uppercase">Investment Share (N%)</label>
-                    <input type="number" id="set-invest-percent" placeholder="درصد کسر سرمایه" class="w-full bg-transparent border-none outline-none font-black text-indigo-800 text-sm">
-                </div>
-                <p class="text-[8px] text-slate-400 leading-relaxed px-1">
-                    وام ماهانه: مبلغی که هر ماه به نفر واجدشرایط صف پرداخت میشه.
-                    قسط استاندارد: مبلغی که هر عضو باید به‌ازای هر سهم، ماهانه واریز کنه.
-                    قسط برنده: مبلغ بازپرداخت ماهانه‌ی کسی که وام نوبتی گرفته.
-                    درصد سرمایه: چند درصد از هر واریزی تاییدشده، خودکار میره تو صندوق سرمایه‌گذاری.
-                </p>
-            </div>
-        </div>
-    </div>
 
-    <!-- گروه ۴: مدیریت سکه (سیستم انگیزشی پرداخت زودهنگام) -->
-    <div class="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-        <div onclick="toggleAccordion('set-group-4', 'icon-set-4')" class="flex justify-between items-center p-6 cursor-pointer active:bg-slate-50 transition-all">
-            <div class="flex items-center gap-4">
-                <div class="w-10 h-10 bg-yellow-50 text-yellow-600 rounded-2xl flex items-center justify-center shadow-inner"><i class="fas fa-coins"></i></div>
-                <span class="text-xs font-black text-slate-800">مدیریت سکه</span>
-            </div>
-            <i id="icon-set-4" class="fas fa-chevron-down text-slate-300 transition-transform"></i>
-        </div>
-        <div id="set-group-4" class="max-h-0 overflow-hidden transition-all duration-500">
-            <div class="p-6 pt-0 space-y-4">
-                <div class="bg-slate-50 p-4 rounded-2xl border border-transparent focus-within:border-yellow-200 transition-all">
-                    <label class="text-[8px] text-slate-400 font-black block mb-1 uppercase">سکه به‌ازای هر روز (n)</label>
-                    <input type="number" id="set-coin-per-day" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
+                <!-- ۲. دومی: مبلغ بازپرداخت وام -->
+                <div class="bg-slate-50 p-4 rounded-2xl border border-transparent focus-within:border-indigo-200 transition-all">
+                    <label class="text-[9px] text-slate-500 font-black block mb-1">مبلغ بازپرداخت وام</label>
+                    <input type="number" id="set-won-amount" placeholder="مثلاً ۱,۰۰۰,۰۰۰" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
                 </div>
-                <div class="bg-slate-50 p-4 rounded-2xl border border-transparent focus-within:border-yellow-200 transition-all">
-                    <label class="text-[8px] text-slate-400 font-black block mb-1 uppercase">طول پنجره‌ی دریافت سکه (روز، مثلاً ۱۰ = ۵ زودتر و ۵ بعد از یکم)</label>
-                    <input type="number" id="set-coin-window-days" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
-                </div>
-                <div class="bg-slate-50 p-4 rounded-2xl border border-transparent focus-within:border-yellow-200 transition-all">
-                    <label class="text-[8px] text-slate-400 font-black block mb-1 uppercase">سکه‌ی همیاری (جابجایی نوبت)</label>
-                    <input type="number" id="set-coin-cooperation-bonus" class="w-full bg-transparent border-none outline-none font-black text-slate-800 text-sm">
-                </div>
-                <div class="bg-yellow-50/50 p-4 rounded-2xl border border-yellow-100">
-                    <label class="text-[8px] text-yellow-700 font-black block mb-1 uppercase">قیمت هر سکه (تومان)</label>
-                    <input type="number" id="set-coin-price" class="w-full bg-transparent border-none outline-none font-black text-yellow-800 text-sm">
-                </div>
+
+                <!-- ۳. سومی: کل مبلغ وام ماهانه برای هر سهم -->
                 <div class="bg-rose-50/50 p-4 rounded-2xl border border-rose-100">
-                    <label class="text-[8px] text-rose-600 font-black block mb-1 uppercase">شرکت در خیریه — هر n تومان، ۱ سکه</label>
-                    <input type="number" id="set-coin-charity-rate" placeholder="مثلاً ۱۰۰۰۰" class="w-full bg-transparent border-none outline-none font-black text-rose-800 text-sm">
+                    <label class="text-[9px] text-rose-600 font-black block mb-1">کل مبلغ وام ماهانه برای هر سهم</label>
+                    <input type="number" id="set-monthly-loan-amount" placeholder="مثلاً ۸۰,۰۰۰,۰۰۰" class="w-full bg-transparent border-none outline-none font-black text-rose-800 text-sm">
                 </div>
+
+                <!-- ۴. چهارمی: درصد کسر از واریزی ماهانه -->
+                <div class="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
+                    <label class="text-[9px] text-indigo-600 font-black block mb-1">درصد کسر از واریزی ماهانه (سرمایه‌گذاری)</label>
+                    <input type="number" id="set-invest-percent" placeholder="درصد کسر، مثلاً ۱۰" class="w-full bg-transparent border-none outline-none font-black text-indigo-800 text-sm">
+                </div>
+
+                <!-- توضیحات راهنما -->
                 <p class="text-[8px] text-slate-400 leading-relaxed px-1">
-                    سکه/روز: هر روزی که به یکم مونده یا از یکم گذشته، سکه به همین اندازه بیشتر/کمتر میشه.
-                    طول پنجره: تعداد کل روزهایی که سکه گرفته میشه (نصفش قبل یکم، نصفش بعدش).
-                    همیاری: سکه‌ای که با جابجایی نوبت به نفع یه عضو دیگه گرفته میشه.
-                    قیمت سکه و نرخ خیریه برای تبدیل سکه به تومان و برعکس استفاده میشن.
+                    • <b>مبلغ ثابت ماهانه:</b> پس‌انداز ماهانه هر عضو به ازای هر ۱ سهم قبل از برنده شدن وام.<br>
+                    • <b>مبلغ بازپرداخت وام:</b> قسط ماهانه‌ای که عضو پس از دریافت وام باید پرداخت کند.<br>
+                    • <b>کل مبلغ وام ماهانه:</b> میزان کل وامی که ماهانه به نوبت به برنده پرداخت می‌شود.<br>
+                    • <b>درصد کسر از واریزی:</b> درصدی از واریزی‌ها که جهت سودآوری به صندوق سرمایه‌گذاری منتقل می‌شود.
                 </p>
             </div>
         </div>
