@@ -18,6 +18,10 @@
     
     <!-- کتابخانه‌ها -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      // اگه jsdelivr لود نشد (فیلتر/کندی)، از CDN دوم امتحان کن
+      window.supabase || document.write('<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>');
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
@@ -1202,10 +1206,15 @@ html, body {
         };
 
         // لمس صفحه هم به‌عنوان راه فرار (Skip) کار می‌کنه، مگه اینکه رو حالت خطا باشیم
-        splash.addEventListener('click', () => { if (!errored) finish(); });
+        splash.addEventListener('click', () => { if (!errored && dataReady) finish(); });
 
         // شبکه‌ی ایمنی: اگه به هر دلیلی لود خیلی طول کشید، بعد از ۱۲ ثانیه خودکار تموم شو
-        setTimeout(finish, 12000);
+        // (اگه تا اون موقع داده‌ی واقعی نیومده بود، به‌جای پنل خالی، خطای اتصال + تلاش مجدد نشون بده)
+        setTimeout(() => {
+            if (finished || errored) return;
+            if (dataReady) finish();
+            else window.showNetworkError('اتصال کند است ⚠️ دوباره تلاش کنید');
+        }, 12000);
     })();
     </script>
 
@@ -1535,7 +1544,10 @@ html, body {
                 <button onclick="selectPaymentCategory('monthly')" class="w-full flex items-center justify-between bg-slate-50 hover:bg-slate-100 border border-slate-100 rounded-[1.8rem] p-4 active:scale-95 transition-all">
                     <div class="flex items-center gap-3">
                         <div class="w-11 h-11 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center"><i class="fas fa-calendar-check"></i></div>
-                        <span class="text-[11px] font-black text-slate-700">وام ماهانه</span>
+                        <div class="text-right">
+                            <span class="text-[11px] font-black text-slate-700">وام ماهانه</span>
+                            <div id="pay-status-monthly" class="mt-1 flex flex-wrap gap-1 text-[8px] font-black"></div>
+                        </div>
                     </div>
                     <div class="text-left">
                         <p id="pay-amount-monthly" class="text-[11px] font-black text-slate-800">...</p>
@@ -1619,6 +1631,7 @@ html, body {
                     <label id="receipt-amount-label" class="block text-[10px] font-black text-slate-700 text-right px-1">
                         مبلغ ثابت ماهانه
                     </label>
+                    <div id="monthly-paid-note" class="hidden"></div>
                     <div class="bg-slate-50 p-3 rounded-2xl flex items-center border border-slate-200 focus-within:border-emerald-500 focus-within:bg-white focus-within:shadow-md transition-all">
                         <i class="fas fa-wallet text-slate-400 ml-3 text-xs"></i>
                         <input type="number" id="receipt-amount-input" placeholder="مبلغ به تومان" 
@@ -1632,6 +1645,7 @@ html, body {
                         <label class="text-[10px] font-black text-violet-700">مبلغ بازپرداخت وام</label>
                         <span id="loan-repay-hint" class="text-[8px] font-bold text-violet-500 bg-violet-50 px-2 py-0.5 rounded-lg border border-violet-100"></span>
                     </div>
+                    <div id="loan-paid-note" class="hidden"></div>
                     <div class="bg-violet-50/70 p-3 rounded-2xl flex items-center border border-violet-200 focus-within:border-violet-500 focus-within:bg-white focus-within:shadow-md transition-all">
                         <i class="fas fa-undo-alt text-violet-400 ml-3 text-xs"></i>
                         <input type="number" id="loan-repay-input" placeholder="مبلغ کسر از اصل وام"

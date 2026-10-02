@@ -8,7 +8,7 @@ const S_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJl
 
 // ۲. ساخت کلاینت سوپابیس (با تنظیمات پایداری نشست) ✅
 // این تنظیمات را در تمام فایل‌ها جایگزین supabaseClient قبلی کن 👇
-const supabaseClient = supabase.createClient(S_URL, S_KEY, {
+var supabaseClient = (typeof supabase === 'undefined') ? null : supabase.createClient(S_URL, S_KEY, {
     auth: {
         persistSession: true,
         storageKey: 'ebank-auth-session', // یک نام ثابت و اختصاصی ✅
@@ -134,7 +134,7 @@ async function handleAdminLinkedSession() {
 // هر وقت سوپابیس به‌صورت خودکار توکنِ فعلی رو تازه کنه (هر ~۱ ساعت)، اگه این نشست
 // از طریق جابجاییِ مدیر باز شده، نسخه‌ی ذخیره‌شده‌ی توکن عضو رو هم به‌روز کن
 // تا دفعه‌ی بعدِ «جابجایی» با توکنِ باطل‌شده مواجه نشه و دوباره رمز نخواد.
-supabaseClient.auth.onAuthStateChange((event, session) => {
+if (supabaseClient) supabaseClient.auth.onAuthStateChange((event, session) => {
     if (event !== 'TOKEN_REFRESHED' || !session) return;
     try {
         const returnRaw = localStorage.getItem('ebank_admin_return_session');
@@ -184,27 +184,58 @@ window.returnToAdminPanel = async function() {
 };
 
 // ۳. مدیریت شروع برنامه با نشست امن JWT
+// ---- کمکی‌های شبکه: تشخیص خطای اینترنت + تلاش مجدد خودکار ----
+function isNetErr(e) {
+    const m = String((e && (e.message || e.msg)) || e || '');
+    return !navigator.onLine
+        || /fetch|network|load failed|timeout|timed out|ECONN|ERR_/i.test(m)
+        || (e && (e.name === 'AuthRetryableFetchError' || e.status === 0));
+}
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+async function withRetry(fn, tries = 3) {
+    let last;
+    for (let i = 0; i < tries; i++) {
+        try { return await fn(); }
+        catch (e) {
+            last = e;
+            if (!isNetErr(e)) throw e;          // خطای غیرشبکه‌ای: تلاش مجدد بی‌فایده است
+            await _sleep(800 * (i + 1));
+        }
+    }
+    throw last;
+}
+
+let _memberBootFailed = false;
+
 document.addEventListener('DOMContentLoaded', async () => {
     console.log("🚀 شروع بیدارباش هوشمند پنل اعضا...");
-    // اسپلش اسکرین جدید خودش رو مدیریت می‌کنه (اسکریپت داخل member.html)
+    // اسپلش اسکرین خودش رو مدیریت می‌کنه (اسکریپت داخل member.html)
+    // ⚠️ دیگه به navigator.onLine برای «بستن راه» تکیه نمی‌کنیم؛ روی موبایل/فیلترشکن اغلب غلط می‌گه.
+    // اتصال واقعی رو با خود درخواست‌ها (و تلاش مجدد) می‌سنجیم.
 
-    // اگه از همون اول اینترنت وصل نیست، حتی تلاش نکن وارد پنل بشه
-    if (!navigator.onLine) {
-        if (typeof window.showNetworkError === 'function') window.showNetworkError();
+    const fail = (msg) => {
+        _memberBootFailed = true;
+        if (typeof window.showNetworkError === 'function') window.showNetworkError(msg);
+    };
+
+    if (!supabaseClient) {
+        fail('بارگذاری کتابخانه‌ها ناموفق بود ⚠️ اینترنت را بررسی کنید');
         return;
     }
-
-    let networkFailed = false;
 
     try {
         // ۱.۵ اگه از دکمه‌ی جابجایی پنل مدیر اومدیم، نشست رو با نشست عضو جایگزین کن
         await handleAdminLinkedSession();
 
-        // ۲. بررسی نشست امن (JWT)
-        const { data: { session }, error: sErr } = await supabaseClient.auth.getSession();
-        if (sErr || !session) { 
-            window.location.replace('index.html'); 
-            return; 
+        // ۲. بررسی نشست امن (JWT) — خطای شبکه ≠ نبودن نشست؛ فقط نبودن واقعی نشست به لاگین برمی‌گردونه
+        const session = await withRetry(async () => {
+            const { data, error } = await supabaseClient.auth.getSession();
+            if (!data?.session && error && isNetErr(error)) throw error;
+            return data?.session || null;
+        });
+        if (!session) {
+            window.location.replace('index.html');
+            return;
         }
 
         const userId = session.user.id;
@@ -214,8 +245,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         // ۳. بازیابی هوشمند pool_id (اگر گم شده باشد) 👇
         if (!myPoolId || myPoolId === "null") {
             console.log("⚠️ آیدی صندوق یافت نشد، در حال استعلام از سرور...");
-            const { data: userMember } = await supabaseClient.from('members').select('pool_id, full_name').eq('id', userId).single();
-            if (userMember) {
+            const userMember = await withRetry(async () => {
+                const { data, error } = await supabaseClient.from('members').select('pool_id, full_name').eq('id', userId).maybeSingle();
+                if (error) throw error;
+                return data;
+            });
+            if (userMember && userMember.pool_id) {
                 myPoolId = userMember.pool_id;
                 sessionStorage.setItem('pool_id', myPoolId);
                 sessionStorage.setItem('user_name', userMember.full_name);
@@ -225,17 +260,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-      
-      
-        
         // 4. نمایش نام کاربر در هدر و همچنین در پشت کارت
-const userName = sessionStorage.getItem('user_name');
-const nameDisplay = document.getElementById('user-name-display');
-if (nameDisplay) nameDisplay.innerText = userName || "کاربر گرامی";
+        const userName = sessionStorage.getItem('user_name');
+        const nameDisplay = document.getElementById('user-name-display');
+        if (nameDisplay) nameDisplay.innerText = userName || "کاربر گرامی";
 
-// ست کردن اسم عضو در پشت کارت معنوی 👇
-const cardBackName = document.getElementById('card-back-user-name');
-if (cardBackName) cardBackName.innerText = userName || "عزیز";
+        // ست کردن اسم عضو در پشت کارت معنوی 👇
+        const cardBackName = document.getElementById('card-back-user-name');
+        if (cardBackName) cardBackName.innerText = userName || "عزیز";
 
         // ۴.۵ اگه از پنل مدیر جابجا شدیم، دکمه‌ی بازگشت به پنل مدیر رو نشون بده
         const returnAdminBtn = document.getElementById('return-to-admin-btn');
@@ -243,52 +275,52 @@ if (cardBackName) cardBackName.innerText = userName || "عزیز";
             returnAdminBtn.classList.remove('hidden');
         }
 
-        // ۵. استعلام و نمایش عکس پروفایل واقعی
-        const { data: memberData } = await supabaseClient.from('members').select('avatar_url').eq('id', userId).maybeSingle();
-        if (memberData && memberData.avatar_url) {
-            const imgEl = document.getElementById('user-avatar-header');
-            const iconEl = document.getElementById('default-avatar-icon');
-            if (imgEl && iconEl) {
-                imgEl.src = memberData.avatar_url;
-                imgEl.classList.remove('hidden');
-                iconEl.classList.add('hidden');
+        // ۵. استعلام و نمایش عکس پروفایل واقعی (غیرحیاتی: خطاش نباید پنل رو متوقف کنه)
+        try {
+            const { data: memberData } = await supabaseClient.from('members').select('avatar_url').eq('id', userId).maybeSingle();
+            if (memberData && memberData.avatar_url) {
+                const imgEl = document.getElementById('user-avatar-header');
+                const iconEl = document.getElementById('default-avatar-icon');
+                if (imgEl && iconEl) {
+                    imgEl.src = memberData.avatar_url;
+                    imgEl.classList.remove('hidden');
+                    iconEl.classList.add('hidden');
+                }
             }
+        } catch (e) { console.warn('avatar load failed', e); }
+
+        // ۶. شلیک تمام لودرهای اطلاعات (خطای یکی از لودرها نباید کل پنل رو از کار بندازه) 🎯
+        console.log("📦 در حال فراخوانی داده‌های مالی و خبری...");
+        try {
+            loadUserFinancials(userId, myPoolId);
+            calculateMyTotalDeposits(userId, myPoolId);
+            calculateUserTotalProfit(userId, myPoolId);
+            loadDebtSummaryCard(userId, myPoolId);
+            checkSwapNotifications(userId, myPoolId);
+            loadMyTransactions(userId, myPoolId);
+            loadManagerCard(myPoolId);
+            loadActiveLoans(userId, myPoolId);
+            loadUserQueuePosition(userId, myPoolId); // نمایش نوبت
+            loadMemberNews(myPoolId);               // لود اخبار (فقط یک‌بار)
+            loadActivePoll(userId, myPoolId);       // لود نظرسنجی
+            checkDebtWarning(userId).then(() => refreshPaymentIndicator(userId, myPoolId)).catch(() => {});
+            initChatUnreadWatcher();
+        } catch (loaderErr) {
+            console.error('Loader launch error:', loaderErr);
         }
 
-        // ۶. شلیک تمام لودرهای اطلاعات (یکپارچه و بدون تکرار) 🎯
-        console.log("📦 در حال فراخوانی داده‌های مالی و خبری...");
-        
-        loadUserFinancials(userId, myPoolId);
-        calculateMyTotalDeposits(userId, myPoolId);
-        calculateUserTotalProfit(userId, myPoolId);
-        loadDebtSummaryCard(userId, myPoolId);
-        checkSwapNotifications(userId, myPoolId);
-        loadMyTransactions(userId, myPoolId);
-        loadManagerCard(myPoolId);
-        loadActiveLoans(userId, myPoolId);
-        loadUserQueuePosition(userId, myPoolId); // نمایش نوبت
-        loadMemberNews(myPoolId);               // لود اخبار (فقط یک‌بار)
-        loadActivePoll(userId, myPoolId);       // لود نظرسنجی
-        
-        checkDebtWarning(userId);
-        initChatUnreadWatcher();
-
+        // موفق: اسپلش تموم بشه
+        if (typeof window.finishSplash === 'function') window.finishSplash();
 
     } catch (err) {
         console.error("Critical Init Error:", err);
-        const looksLikeNetworkError = !navigator.onLine || /fetch|network|Failed to fetch/i.test(err?.message || '');
-        if (looksLikeNetworkError) {
-            networkFailed = true;
-            if (typeof window.showNetworkError === 'function') window.showNetworkError();
-        }
-    } finally {
-        // اسپلش منتظر همین سیگناله تا از ۹۲٪ به ۱۰۰٪ بره و محو بشه
-        // (اگه قطعی اینترنت بود، عمداً صدا نمی‌زنیم تا کاربر وارد پنل نشه)
-        if (!networkFailed && typeof window.finishSplash === 'function') window.finishSplash();
+        if (isNetErr(err)) fail('اتصال اینترنت برقرار نیست ⚠️');
+        else fail('خطا در دریافت اطلاعات ⚠️ دوباره تلاش کنید');
     }
 });
 
-
+// وقتی اینترنت برگشت و بوت قبلاً شکست خورده بود، خودکار دوباره امتحان کن
+window.addEventListener('online', () => { if (_memberBootFailed) location.reload(); });
 
 
     // ۳. صدا زدن تابع اخطار بدهی 👇
@@ -504,9 +536,110 @@ window.copyManagerCard = function(text) {
 
 
 
+
+// ==================================================
+// ماه شمسی (به وقت تهران) — هم‌تعریف با پنل مدیر
+// ==================================================
+function getJalaliMonthBounds(date) {
+    const d = date || new Date();
+    const DAY = 86400000;
+    const parts = (ms, locale) => {
+        const o = {};
+        new Intl.DateTimeFormat(locale, { timeZone: 'Asia/Tehran', year: 'numeric', month: 'numeric', day: 'numeric' })
+            .formatToParts(new Date(ms)).forEach(p => { if (p.type !== 'literal') o[p.type] = Number(p.value); });
+        return o;
+    };
+    try {
+        const fa = 'fa-IR-u-nu-latn-ca-persian';
+        const pj = parts(d.getTime(), fa), gr = parts(d.getTime(), 'en-US');
+        if (!pj.day || !gr.day) throw new Error('Intl persian calendar unsupported');
+        const midnight = Date.UTC(gr.year, gr.month - 1, gr.day) - 3.5 * 3600 * 1000; // ایران: UTC+3:30 ثابت
+        const start = midnight - (pj.day - 1) * DAY;
+        let next = start + 29 * DAY;                       // ماه شمسی ۲۹ تا ۳۱ روزه‌ست
+        for (let i = 0; i < 3; i++) {
+            const cand = start + (29 + i) * DAY;
+            if (parts(cand + 12 * 3600 * 1000, fa).day === 1) { next = cand; break; }
+        }
+        return { year: pj.year, month: pj.month, day: pj.day,
+                 start: new Date(start), nextStart: new Date(next),
+                 startISO: new Date(start).toISOString() };
+    } catch (e) {
+        console.warn('getJalaliMonthBounds fallback (میلادی):', e);
+        const st = new Date(d.getFullYear(), d.getMonth(), 1), nx = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+        return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), start: st, nextStart: nx, startISO: st.toISOString() };
+    }
+}
+
+// فاصله‌ی تاریخ تا نزدیک‌ترین «یکم ماه شمسی» (منفی = زودتر از ماه بعد)
+function jalaliCoinOffset(date) {
+    const b = getJalaliMonthBounds(date);
+    const diffToThis = Math.round((date - b.start) / 86400000);
+    const diffToNext = Math.round((date - b.nextStart) / 86400000);
+    return Math.abs(diffToNext) < Math.abs(diffToThis) ? diffToNext : diffToThis;
+}
+
+function formatJalaliDate(d) {
+    return new Date(d).toLocaleDateString('fa-IR', { timeZone: 'Asia/Tehran', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+// وضعیت پرداخت «این ماه شمسی» برای قسط ثابت و قسط وام نوبتی
+// state: 'approved' (پرداخت شده) | 'pending' (در انتظار تایید) | 'none'
+async function getMonthPaymentStatus(userId, poolId) {
+    const empty = { state: 'none', amount: 0, date: null };
+    try {
+        const { data } = await supabaseClient
+            .from('transactions')
+            .select('amount, category, status, created_at')
+            .eq('member_id', userId)
+            .eq('pool_id', poolId)
+            .eq('type', 'in')
+            .in('category', ['monthly', 'loan_repayment'])
+            .in('status', ['approved', 'pending'])
+            .gte('created_at', getJalaliMonthBounds().startISO);
+
+        const pick = (cat) => {
+            const rows = (data || []).filter(t => t.category === cat);
+            for (const st of ['approved', 'pending']) {
+                const r = rows.filter(t => t.status === st);
+                if (r.length) {
+                    return {
+                        state: st,
+                        amount: r.reduce((s, t) => s + Number(t.amount || 0), 0),
+                        date: r.map(t => t.created_at).sort().pop()
+                    };
+                }
+            }
+            return { ...empty };
+        };
+        return { monthly: pick('monthly'), loan: pick('loan_repayment') };
+    } catch (e) {
+        console.error('getMonthPaymentStatus failed:', e);
+        return { monthly: { ...empty }, loan: { ...empty } };
+    }
+}
+
+// نشانگر روی دکمه‌ی «+» : سبز ✓ (همه پرداخت شده) / ساعت شنی (در انتظار تایید)
+async function refreshPaymentIndicator(userId, poolId) {
+    const btn = document.getElementById('main-action-btn');
+    const icon = document.getElementById('main-action-icon');
+    if (!btn || !icon || btn.classList.contains('warning-pulse')) return; // اخطار مدیر اولویت داره
+    const st = await getMonthPaymentStatus(userId, poolId);
+    btn.classList.remove('bg-emerald-600', 'bg-amber-500');
+    if (st.monthly.state === 'approved') {
+        btn.classList.remove('bg-slate-900'); btn.classList.add('bg-emerald-600');
+        icon.className = 'fas fa-check text-xl';
+    } else if (st.monthly.state === 'pending') {
+        btn.classList.remove('bg-slate-900'); btn.classList.add('bg-amber-500');
+        icon.className = 'fas fa-hourglass-half text-xl';
+    } else {
+        btn.classList.add('bg-slate-900');
+        icon.className = 'fas fa-plus text-xl';
+    }
+}
+
 async function checkMonthlyReminder(userId, poolId) {
-    const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-    const { data } = await supabaseClient.from('transactions').select('*').eq('member_id', userId).eq('pool_id', poolId).eq('status', 'approved').eq('type', 'in').gte('created_at', firstDay);
+    const firstDay = getJalaliMonthBounds().startISO;
+    const { data } = await supabaseClient.from('transactions').select('*').eq('member_id', userId).eq('pool_id', poolId).in('status', ['approved', 'pending']).eq('type', 'in').eq('category', 'monthly').gte('created_at', firstDay);
     if (!data || data.length === 0) {
         const banner = document.createElement('div');
         banner.className = 'bg-rose-600 text-white p-3 text-[9px] text-center font-bold sticky top-0 z-[200] animate-pulse';
@@ -606,7 +739,11 @@ window.uploadReceipt = async function() {
     const category = selectedPaymentCategory || 'monthly'; // احتیاطی: اگه دسته انتخاب نشده بود، پیش‌فرض قسط ماهانه
 
     // ۱. اعتبارسنجی ورودی‌ها (Validation)
-    if (!amount || Number(amount) <= 0) {
+    // در پرداخت ماهانه، قسط ثابت و بازپرداخت وام هرکدوم می‌تونه صفر باشه (ولی نه هر دو)
+    const isMonthlyCat = category === 'monthly';
+    const baseAmt = Number(amount) || 0;
+    const repayPre = Number(document.getElementById('loan-repay-input')?.value) || 0;
+    if (baseAmt < 0 || (isMonthlyCat ? (baseAmt <= 0 && repayPre <= 0) : baseAmt <= 0)) {
         return Swal.fire({ text: "لطفاً مبلغ واریزی را به عدد وارد کنید ❌", icon: 'warning' });
     }
     if (!file) {
@@ -626,6 +763,36 @@ window.uploadReceipt = async function() {
     // ۲. فیلتر فقط عکس (JPG, PNG)
     if (!file.type.startsWith('image/')) {
         return Swal.fire({ text: "فقط فایل تصویری مجاز است ❌", icon: 'error' });
+    }
+
+    // ۲.۵ پاپ‌آپ تایید: اگه بخشی که پر کرده این ماه قبلاً پرداخت (یا ثبت) شده
+    if (isMonthlyCat && paymentModalCache?.payStatus) {
+        const ps = paymentModalCache.payStatus;
+        const lines = [];
+        const warn = (st, paidTxt, pendTxt) => {
+            const d = formatJalaliDate(st.date);
+            lines.push(st.state === 'approved' ? paidTxt.replace('{d}', d) : pendTxt.replace('{d}', d));
+        };
+        if (baseAmt > 0 && ps.monthly.state !== 'none') {
+            warn(ps.monthly, 'شما در تاریخ {d} واریزی ثابت ماه جاری را پرداخت کرده‌اید.', 'فیش واریزی ثابت ماه جاری شما در تاریخ {d} ثبت شده و هنوز در انتظار تایید مدیر است.');
+        }
+        if (repayAmount > 0 && ps.loan.state !== 'none') {
+            warn(ps.loan, 'شما قسط وام ماه جاری را در تاریخ {d} پرداخت کرده‌اید.', 'فیش قسط وام ماه جاری شما در تاریخ {d} ثبت شده و هنوز در انتظار تایید مدیر است.');
+        }
+        if (lines.length) {
+            const ask = await Swal.fire({
+                title: 'پرداخت تکراری؟',
+                html: `<p style="font-size:12px;line-height:2;color:#475467;">${lines.join('<br>')}<br><b>در هر صورت ادامه می‌دهید؟</b></p>`,
+                icon: 'warning',
+                showCancelButton: true,
+                focusCancel: true,
+                confirmButtonText: 'بله، ادامه می‌دهم',
+                cancelButtonText: 'انصراف',
+                confirmButtonColor: '#4f46e5',
+                customClass: { popup: 'rounded-[2rem]' }
+            });
+            if (!ask.isConfirmed) return;
+        }
     }
 
     // ۳. فعال کردن حالت لودینگ روی دکمه
@@ -653,7 +820,8 @@ window.uploadReceipt = async function() {
 
         // ۶. ثبت سند مالی در جدول تراکنش‌ها
         // یک عکس، دو ردیف: قسط ثابت (سپرده) + بازپرداخت وام (فقط کم‌کردن بدهی) — مدیر هر دو را با هم تایید می‌کند
-        const rows = [{
+        const rows = [];
+        if (!isMonthlyCat || baseAmt > 0) rows.push({
             member_id: userId,
             pool_id: poolId,
             amount: Number(amount),
@@ -661,7 +829,7 @@ window.uploadReceipt = async function() {
             type: 'in',
             category: category,
             receipt_url: urlData.publicUrl
-        }];
+        });
         if (repayAmount > 0) rows.push({
             member_id: userId,
             pool_id: poolId,
@@ -2172,12 +2340,7 @@ function calculateTodayCoinChange(coinPerDay, coinWindowDays) {
     const half = Math.floor(winDays / 2);
     const peak = perDay * winDays;
 
-    const txDate = new Date();
-    const thisMonthFirst = new Date(txDate.getFullYear(), txDate.getMonth(), 1);
-    const nextMonthFirst = new Date(txDate.getFullYear(), txDate.getMonth() + 1, 1);
-    const diffToThis = Math.round((txDate - thisMonthFirst) / 86400000);
-    const diffToNext = Math.round((txDate - nextMonthFirst) / 86400000);
-    const offset = Math.abs(diffToNext) < Math.abs(diffToThis) ? diffToNext : diffToThis;
+    const offset = jalaliCoinOffset(new Date()); // نزدیک‌ترین یکم ماه «شمسی»
 
     const rawChange = offset <= -half ? peak : (peak - perDay * (offset + half));
     return { rawChange, peak, perDay };
@@ -2217,11 +2380,12 @@ window.openDepositDrawer = async function() {
         const poolId = sessionStorage.getItem('pool_id');
 
         // دریافت اطلاعات کاربر (تعداد سهام) و تنظیمات صندوق
-        const [{ data: user }, { data: settings }, debts, { data: mData }] = await Promise.all([
+        const [{ data: user }, { data: settings }, debts, { data: mData }, payStatus] = await Promise.all([
             supabaseClient.from('members').select('total_shares').eq('id', userId).single(),
             supabaseClient.from('settings').select('base_amount, won_amount, coin_per_day, coin_window_days, coin_charity_rate').eq('pool_id', poolId).maybeSingle(),
             getMemberDebtSummary(userId, poolId),
-            supabaseClient.from('members').select('emergency_due_date, coin_assistance_due_date').eq('id', userId).maybeSingle()
+            supabaseClient.from('members').select('emergency_due_date, coin_assistance_due_date').eq('id', userId).maybeSingle(),
+            getMonthPaymentStatus(userId, poolId)
         ]);
 
         const totalShares = Number(user?.total_shares) || 1;
@@ -2253,6 +2417,19 @@ window.openDepositDrawer = async function() {
             }
         }
 
+        // وضعیت پرداخت این ماه (شمسی) روی دکمه‌ی «وام ماهانه»
+        const chipEl = document.getElementById('pay-status-monthly');
+        if (chipEl) {
+            const chip = (label, st) => {
+                if (st.state === 'approved') return `<span class="inline-block bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-lg">${label}: ✓ پرداخت شده</span>`;
+                if (st.state === 'pending') return `<span class="inline-block bg-amber-100 text-amber-700 px-2 py-0.5 rounded-lg">${label}: ⏳ در انتظار تایید</span>`;
+                return `<span class="inline-block bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg">${label}: پرداخت نشده</span>`;
+            };
+            let chips = chip('قسط ماهانه', payStatus.monthly);
+            if (loanDebt > 0 || payStatus.loan.state !== 'none') chips += ' ' + chip('قسط وام', payStatus.loan);
+            chipEl.innerHTML = chips;
+        }
+
         // مساعده و مساعده سکه‌ای
         const emergencyBtn = document.getElementById('pay-option-emergency');
         const coinAssistBtn = document.getElementById('pay-option-coin_assistance');
@@ -2274,6 +2451,7 @@ window.openDepositDrawer = async function() {
         // ذخیره کش با تمام محاسبات انجام شده
         paymentModalCache = {
             totalMonthlyDue: totalMonthlyDue,
+            payStatus: payStatus,
             basePrice: basePrice,
             autoRepayPortion: autoRepayPortion,
             monthlyLoanDebt: loanDebt,
@@ -2323,18 +2501,48 @@ window.selectPaymentCategory = function(category) {
         else if (category === 'charity') labelEl.innerText = 'مبلغ کمک داوطلبانه به خیریه';
     }
 
+    const monthlyNote = document.getElementById('monthly-paid-note');
+    const loanNote = document.getElementById('loan-paid-note');
+    if (monthlyNote) { monthlyNote.classList.add('hidden'); monthlyNote.innerHTML = ''; }
+    if (loanNote) { loanNote.classList.add('hidden'); loanNote.innerHTML = ''; }
+    amountInput.placeholder = 'مبلغ به تومان';
+
     if (category === 'monthly') {
         const basePortion = paymentModalCache.basePrice;
         const repayPortion = paymentModalCache.autoRepayPortion;
         const loanDebt = paymentModalCache.monthlyLoanDebt;
+        const ps = paymentModalCache.payStatus || { monthly: { state: 'none' }, loan: { state: 'none' } };
 
-        amountInput.value = basePortion || '';
+        const noteHtml = (st, paidTxt, pendTxt) => st.state === 'approved'
+            ? `<div class="bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-xl p-2.5 text-[9px] font-black leading-relaxed">✅ ${paidTxt.replace('{d}', formatJalaliDate(st.date)).replace('{a}', Number(st.amount).toLocaleString())}</div>`
+            : `<div class="bg-amber-50 border border-amber-100 text-amber-700 rounded-xl p-2.5 text-[9px] font-black leading-relaxed">⏳ ${pendTxt.replace('{d}', formatJalaliDate(st.date)).replace('{a}', Number(st.amount).toLocaleString())}</div>`;
 
-        if (repayPortion > 0) {
-            repayInput.value = repayPortion;
+        // قسط ثابت: اگه این ماه پرداخت شده، خالی می‌مونه (پر نمیشه) تا ناخواسته دوباره پرداخت نشه
+        if (ps.monthly.state !== 'none' && monthlyNote) {
+            monthlyNote.innerHTML = noteHtml(ps.monthly,
+                'شما در تاریخ {d} واریزی ثابت ماه جاری ({a} ت) را پرداخت کرده‌اید.',
+                'فیش واریزی ثابت ماه جاری شما در تاریخ {d} ({a} ت) ثبت شده و هنوز در انتظار تایید مدیر است.');
+            monthlyNote.classList.remove('hidden');
+            amountInput.value = '';
+        } else {
+            amountInput.value = basePortion || '';
+        }
+
+        // قسط وام نوبتی: هر وقت بدهی داره نمایش داده می‌شه؛ خالی/صفر = پرداخت نمی‌کنم
+        if (loanDebt > 0) {
             repayWrap.classList.remove('hidden');
             const hintEl = document.getElementById('loan-repay-hint');
             if (hintEl) hintEl.innerText = `کسر از اصل وام (مانده: ${loanDebt.toLocaleString()} ت)`;
+            if (ps.loan.state !== 'none' && loanNote) {
+                loanNote.innerHTML = noteHtml(ps.loan,
+                    'شما قسط وام ماه جاری را در تاریخ {d} ({a} ت) پرداخت کرده‌اید.',
+                    'فیش قسط وام ماه جاری شما در تاریخ {d} ({a} ت) ثبت شده و هنوز در انتظار تایید مدیر است.');
+                loanNote.classList.remove('hidden');
+                repayInput.value = '';
+            } else {
+                repayInput.value = repayPortion > 0 ? repayPortion : '';
+            }
+            amountInput.placeholder = 'مبلغ به تومان — خالی = پرداخت نمی‌کنم';
         } else {
             repayInput.value = '';
             repayWrap.classList.add('hidden');
