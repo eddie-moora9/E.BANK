@@ -660,14 +660,29 @@ window.openPassModal = function() {
 window.closePassModal = function() {
     const modal = document.getElementById('pass-modal');
     if (modal) modal.classList.add('hidden');
+    ['current-password', 'new-password', 'confirm-password'].forEach(id => {
+        const inp = document.getElementById(id);
+        if (inp) inp.value = '';
+    });
 };
 
 window.submitNewPassword = async function() {
-    const newPass = document.getElementById('new-password').value;
+    const curPass = document.getElementById('current-password')?.value || '';
+    const newPass = document.getElementById('new-password')?.value || '';
+    const confirmPass = document.getElementById('confirm-password')?.value || '';
     const btn = document.getElementById('change-pass-btn');
 
+    if (!curPass) {
+        return Swal.fire({ text: "رمز فعلی خود را وارد کنید", icon: 'warning' });
+    }
     if (!newPass || newPass.length < 6) {
         return Swal.fire({ text: "رمز جدید باید حداقل ۶ کاراکتر باشد", icon: 'warning' });
+    }
+    if (newPass !== confirmPass) {
+        return Swal.fire({ text: "رمز جدید و تکرار آن یکسان نیستند ❌", icon: 'warning' });
+    }
+    if (newPass === curPass) {
+        return Swal.fire({ text: "رمز جدید باید با رمز فعلی متفاوت باشد", icon: 'warning' });
     }
 
     // لودینگ
@@ -676,21 +691,25 @@ window.submitNewPassword = async function() {
     btn.innerText = "در حال ارتباط با سرور...";
 
     try {
-        // ۱. بررسی مستقیم هویت کاربر از سرور 👇
+        // ۱. بررسی هویت کاربر از سرور
         const { data: { user }, error: userErr } = await supabaseClient.auth.getUser();
-
-        if (userErr || !user) {
+        if (userErr || !user?.email) {
             throw new Error("نشست امنیتی شما تایید نشد. لطفا یکبار خارج و دوباره وارد شوید.");
         }
 
-        // ۲. دستور تغییر رمز در سرور
-        const { error: updateErr } = await supabaseClient.auth.updateUser({ 
-            password: newPass 
-        });
+        // ۲. تایید رمز فعلی (ورود مجدد با رمز فعلی)
+        const { error: authErr } = await supabaseClient.auth.signInWithPassword({ email: user.email, password: curPass });
+        if (authErr) {
+            if (/invalid login credentials/i.test(authErr.message || '')) throw new Error("رمز فعلی اشتباه است ❌");
+            throw authErr;
+        }
 
+        // ۳. دستور تغییر رمز در سرور
+        const { error: updateErr } = await supabaseClient.auth.updateUser({ password: newPass });
         if (updateErr) throw updateErr;
 
-        // ۳. موفقیت
+        // ۴. موفقیت
+        if (typeof closePassModal === 'function') closePassModal();
         await Swal.fire({
             title: 'بروزرسانی موفق ✅',
             text: 'رمز عبور شما با موفقیت تغییر یافت. از این به بعد با رمز جدید وارد شوید.',
@@ -698,12 +717,10 @@ window.submitNewPassword = async function() {
             confirmButtonColor: '#10b981'
         });
 
-        if (typeof closePassModal === 'function') closePassModal();
-
     } catch (e) {
         console.error("Pass Change Error:", e);
         Swal.fire({
-            title: 'خطای امنیتی',
+            title: 'خطا',
             text: e.message,
             icon: 'error',
             confirmButtonColor: '#ef4444'

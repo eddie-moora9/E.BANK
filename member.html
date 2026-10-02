@@ -1785,11 +1785,13 @@ html, body {
 </div>
 
 
-<div id="pass-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-md z-[300] flex items-center justify-center p-6">
+<div id="pass-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-md z-[1600] flex items-center justify-center p-6">
     <div class="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl">
         <h4 class="font-black text-slate-800 text-sm mb-6 text-center">تغییر رمز عبور</h4>
         <div class="space-y-4">
-            <input type="password" id="new-password" placeholder="رمز عبور جدید" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs outline-none focus:border-emerald-500 font-bold">
+            <input type="password" id="current-password" autocomplete="current-password" placeholder="رمز فعلی خود را وارد کنید" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs outline-none focus:border-emerald-500 font-bold">
+            <input type="password" id="new-password" autocomplete="new-password" placeholder="رمز جدید" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs outline-none focus:border-emerald-500 font-bold">
+            <input type="password" id="confirm-password" autocomplete="new-password" placeholder="تکرار رمز جدید" class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-xs outline-none focus:border-emerald-500 font-bold">
             <div class="flex gap-2 pt-2">
                 <button onclick="submitNewPassword()" id="change-pass-btn" class="flex-1 bg-emerald-600 text-white py-4 rounded-2xl font-black text-xs">ذخیره رمز</button>
                 <button onclick="document.getElementById('pass-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-400 py-4 rounded-2xl font-black text-xs">لغو</button>
