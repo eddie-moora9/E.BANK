@@ -116,6 +116,17 @@
                     <i class="fas fa-lock absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
                 </div>
             </div>
+
+            <!-- ۶. تعداد سهم مدیر (مؤسس) -->
+            <div class="relative">
+                <label class="text-[8px] text-slate-400 font-black mr-4 mb-0.5 block uppercase tracking-widest">My Shares</label>
+                <div class="relative">
+                    <input type="number" id="m-shares" min="1" step="1" value="1" inputmode="numeric" placeholder="تعداد سهم من در این بانک"
+                        class="ltr-input w-full p-3.5 pr-12 bg-slate-50 border border-transparent rounded-2xl text-sm font-black outline-none focus:border-indigo-500">
+                    <i class="fas fa-coins absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
+                </div>
+                <p class="text-[8px] text-slate-400 font-bold mr-4 mt-1">سهم شما از سهمیه‌ی بانک کم می‌شود (حداقل ۱ سهم).</p>
+            </div>
         </div>
             
         <button onclick="createNewPool()" id="create-btn" 
@@ -255,10 +266,15 @@ async function createNewPool() {
     const mName = document.getElementById('m-name').value.trim();
     const mMobile = document.getElementById('m-mobile').value.trim();
     const mPass = document.getElementById('m-pass').value.trim();
+    const mSharesRaw = document.getElementById('m-shares').value.trim();
+    const mShares = Number(mSharesRaw);
     const btn = document.getElementById('create-btn');
 
-    if(!pName || !pCode || !mName || !mMobile || !mPass) {
+    if(!pName || !pCode || !mName || !mMobile || !mPass || !mSharesRaw) {
         return Swal.fire({text:"تمام کادرها الزامی است", icon:'warning'});
+    }
+    if (!Number.isInteger(mShares) || mShares < 1 || mShares > 100000) {
+        return Swal.fire({text:"تعداد سهم باید یک عدد صحیح و حداقل ۱ باشد", icon:'warning'});
     }
 
     toggleLoading('create-btn', true, 'در حال تأسیس امنیتی...');
@@ -284,7 +300,8 @@ async function createNewPool() {
             pool_code_param: pCode,
             manager_name_param: mName,
             mobile_param: cleanMobile,
-            member_capacity_param: 0
+            member_capacity_param: 0,
+            manager_shares_param: mShares
         });
 
         if (rpcErr) throw rpcErr;
