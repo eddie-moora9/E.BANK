@@ -155,7 +155,13 @@ if (supabaseClient) supabaseClient.auth.onAuthStateChange((event, session) => {
  ************************************************/
 window.returnToAdminPanel = async function() {
     const saved = localStorage.getItem('ebank_admin_return_session');
-    if (!saved) return;
+    if (!saved) {
+        // مدیر یا معاونِ عضو مالی با همان حساب: مستقیم به پنل مدیریت
+        if (sessionStorage.getItem('is_admin') === 'true' || sessionStorage.getItem('is_deputy') === 'true') {
+            window.location.href = 'admin.html';
+        }
+        return;
+    }
 
     Swal.fire({ title: 'در حال بازگشت به پنل مدیر...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
 
@@ -271,7 +277,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // ۴.۵ اگه از پنل مدیر جابجا شدیم، دکمه‌ی بازگشت به پنل مدیر رو نشون بده
         const returnAdminBtn = document.getElementById('return-to-admin-btn');
-        if (returnAdminBtn && localStorage.getItem('ebank_admin_return_session')) {
+        if (returnAdminBtn && (localStorage.getItem('ebank_admin_return_session')
+            || sessionStorage.getItem('is_admin') === 'true' || sessionStorage.getItem('is_deputy') === 'true')) {
             returnAdminBtn.classList.remove('hidden');
         }
 
@@ -1336,7 +1343,7 @@ function renderChatMessage(msg, myId) {
         : `<div class="chat-avatar flex items-center justify-center text-slate-400"><i class="fas fa-user text-[11px]"></i></div>`;
 
     const senderNameHtml = !isMine
-        ? `<p class="chat-sender-name">${sender.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : ''}${sender.full_name || 'عضو'}</p>`
+        ? `<p class="chat-sender-name">${sender.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : (sender.is_deputy ? '<span class="chat-admin-badge" style="background:#0ea5e9">معاون</span>' : '')}${sender.full_name || 'عضو'}</p>`
         : '';
 
     const imageHtml = msg.image_url ? `<img src="${msg.image_url}" onclick="window.open('${msg.image_url}','_blank')">` : '';
@@ -1434,7 +1441,7 @@ window.openGroupChat = async function() {
     // آخرین ۵۰ پیام
     const { data: msgs, error } = await supabaseClient
         .from('messages')
-        .select('*, members!sender_id(full_name, is_admin, avatar_url)')
+        .select('*, members!sender_id(full_name, is_admin, is_deputy, avatar_url)')
         .eq('pool_id', poolId)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -1457,7 +1464,7 @@ window.openGroupChat = async function() {
         .channel('chat-' + poolId)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `pool_id=eq.${poolId}` }, async (payload) => {
             // اطلاعات فرستنده رو جدا می‌گیریم چون پیام لحظه‌ای، جوین شده نمیاد
-            const { data: sender } = await supabaseClient.from('members').select('full_name, is_admin, avatar_url').eq('id', payload.new.sender_id).maybeSingle();
+            const { data: sender } = await supabaseClient.from('members').select('full_name, is_admin, is_deputy, avatar_url').eq('id', payload.new.sender_id).maybeSingle();
             const fullMsg = { ...payload.new, members: sender };
             const emptyState = listEl.querySelector('.text-center');
             if (emptyState) emptyState.remove();
@@ -1489,7 +1496,7 @@ window.openChatGroupInfo = async function() {
     const poolId = sessionStorage.getItem('pool_id');
     const { data: members, error } = await supabaseClient
         .from('members')
-        .select('id, full_name, avatar_url, is_admin')
+        .select('id, full_name, avatar_url, is_admin, is_deputy')
         .eq('pool_id', poolId)
         .order('is_admin', { ascending: false });
 
@@ -1504,7 +1511,7 @@ window.openChatGroupInfo = async function() {
                 ? `<img src="${m.avatar_url}" class="w-11 h-11 rounded-2xl object-cover">`
                 : `<div class="w-11 h-11 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center"><i class="fas fa-user"></i></div>`}
             <span class="text-[11px] font-black text-slate-700 flex-1 text-right">${m.full_name || 'عضو'}</span>
-            ${m.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : ''}
+            ${m.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : (m.is_deputy ? '<span class="chat-admin-badge" style="background:#0ea5e9">معاون</span>' : '')}
         </div>`).join('');
 };
 
@@ -1679,7 +1686,7 @@ function initSecurityMonitor() {
 // محاسبه‌ی صف نوبت (مشترک بین کارت خانه و پیش‌نمایش تعویض نوبت)
 async function getQueueRanking(poolId) {
     const [membersRes, txsRes] = await Promise.all([
-        supabaseClient.from('members').select('id, full_name, eligible_at').eq('pool_id', poolId).eq('is_admin', false),
+        supabaseClient.from('members').select('id, full_name, eligible_at').eq('pool_id', poolId).or('is_admin.eq.false,participates.eq.true'),
         supabaseClient.from('transactions').select('member_id, amount, type, category').eq('pool_id', poolId).eq('status', 'approved')
     ]);
 

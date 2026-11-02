@@ -400,6 +400,7 @@ async function handleLogin() {
         sessionStorage.setItem('pool_id', prof.pool_id);
         sessionStorage.setItem('user_name', prof.full_name); // برای نمایش نام در هدر ✅
         sessionStorage.setItem('is_admin', String(prof.is_admin));
+        sessionStorage.setItem('is_deputy', String(prof.is_deputy === true));
 
         // ورود تازه یعنی همین الان فعالیت کردی؛ ساعت نگهبان بی‌کاری رو ریست کن
         // تا بلافاصله بعد از ورود، به‌خاطر آخرین فعالیتِ روزهای قبل خارج نشی
@@ -420,7 +421,7 @@ async function handleLogin() {
 
         // ۹. انتقال هوشمند با وقفه ایمنی (رفع مشکل پرش به لاگین) 👇
         setTimeout(() => {
-            if (prof.is_admin === true) {
+            if (prof.is_admin === true || prof.is_deputy === true) {
                 window.location.replace('admin.html');
             } else {
                 window.location.replace('member.html');

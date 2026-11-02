@@ -310,6 +310,82 @@ updateTaskBadge(pId); // چک کردن مداوم وضعیت فیش‌ها ✅
     }
 }
 
+
+/************************************************
+ * نقش معاون: دسترسی‌ها، فرم‌ها و محدودسازی پنل
+ * (کنترل اصلی در دیتابیس است؛ این بخش فقط ظاهر پنل را مطابق دسترسی می‌کند)
+ ************************************************/
+window.adminCan = function (perm) {
+    const c = window.ADMIN_CTX;
+    if (!c) return false;
+    return c.isAdmin === true || (c.isDeputy === true && Array.isArray(c.perms) && c.perms.includes(perm));
+};
+
+window.toggleDeputyPerms = function (p) {
+    const on = document.getElementById(p + '-member-is-deputy')?.checked;
+    document.getElementById(p + '-deputy-perms')?.classList.toggle('hidden', !on);
+    const chev = document.getElementById(p + '-deputy-chev');
+    if (chev) chev.style.transform = on ? 'rotate(180deg)' : '';
+};
+
+window.getDeputyFormValue = function (p) {
+    const on = document.getElementById(p + '-member-is-deputy')?.checked === true;
+    if (!on) return { is_deputy: false, deputy_perms: [] };
+    let perms = Array.from(document.querySelectorAll('#' + p + '-deputy-perms input[data-perm]:checked')).map(i => i.getAttribute('data-perm'));
+    if (!perms.length) perms = ['receipts'];
+    return { is_deputy: true, deputy_perms: perms };
+};
+
+window.setDeputyForm = function (p, m) {
+    const box = document.getElementById('deputy-box-' + p);
+    const cb = document.getElementById(p + '-member-is-deputy');
+    if (!box || !cb) return;
+    // مدیر اصلی فقط خودش را نمی‌تواند معاون کند؛ فرم برای حساب مدیر پنهان است
+    const hideBox = !(window.ADMIN_CTX && window.ADMIN_CTX.isAdmin) || (m && m.is_admin === true);
+    box.classList.toggle('hidden', hideBox);
+    cb.checked = !!(m && m.is_deputy);
+    const perms = (m && Array.isArray(m.deputy_perms)) ? m.deputy_perms : (cb.checked ? [] : ['receipts']);
+    document.querySelectorAll('#' + p + '-deputy-perms input[data-perm]').forEach(i => {
+        i.checked = perms.includes(i.getAttribute('data-perm'));
+    });
+    toggleDeputyPerms(p);
+};
+
+window.applyPermissionsUI = function () {
+    const c = window.ADMIN_CTX;
+    if (!c || c.isAdmin) return;                     // مدیر اصلی: همه چیز
+    const $ = (id) => document.getElementById(id);
+    const hide = (el) => { if (el) el.classList.add('hidden'); };
+    const q = (sel) => document.querySelector(sel);
+
+    // فقط مدیر اصلی
+    hide($('nav-biz'));
+    hide($('sec-config') && $('sec-config').parentElement);
+    hide($('sec-data') && $('sec-data').parentElement);
+    const dz = q('[onclick="openDangerZoneReset()"]'); if (dz) hide(dz.closest('.border-dashed') || dz);
+    hide(q('[onclick="openBuyQuotaModal()"]'));
+    hide(q('[onclick="adjustOpeningDebt()"]'));
+    hide($('charity-withdraw-panel'));
+    const ch = q('[onclick*="charity-withdraw-panel"]'); if (ch) hide(ch);
+    hide($('deputy-box-new')); hide($('deputy-box-edit'));
+    const pass = $('edit-member-pass'); if (pass) { pass.disabled = true; pass.placeholder = 'فقط مدیر اصلی'; }
+
+    // عملیات (تب Tasks)
+    const rc = adminCan('receipts'), ln = adminCan('loans');
+    if (!rc) hide($('pill-btn-receipts'));
+    if (!ln) { hide($('pill-btn-loans')); hide($('pill-btn-coins')); hide($('pill-btn-queue')); }
+    if (!rc && !ln) { hide($('pill-btn-debtors')); hide($('pill-btn-transactions')); hide($('nav-ops')); }
+    else setTimeout(() => { try { switchOpsTab(rc ? 'receipts' : 'loans'); } catch (_) {} }, 400);
+
+    // اطلاعیه و نظرسنجی
+    if (!adminCan('news')) hide(q('[onclick="openCreateNews()"]'));
+    if (!adminCan('polls')) hide(q('[onclick="openCreatePoll()"]'));
+
+    // اعضا
+    if (!adminCan('register_member')) hide(q('[onclick="openAddMemberModal()"]'));
+    if (!adminCan('edit_member')) hide(q('[onclick="openEditModalFromProfile()"]'));
+};
+
 // ۲. حالا موتور اصلی برنامه
 // ---- کمکی‌های شبکه: تشخیص خطای اینترنت + تلاش مجدد خودکار ----
 function isNetErr(e) {
@@ -384,7 +460,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // ۲) پرچم‌های حساب (خطا دیگه قورت داده نمی‌شه)
         const pwFlag = await withRetry(async () => {
             const { data, error } = await supabaseClient.from('members')
-                .select('must_change_password, is_super_admin').eq('id', session.user.id).maybeSingle();
+                .select('must_change_password, is_super_admin, is_admin, is_deputy, deputy_perms, participates').eq('id', session.user.id).maybeSingle();
             if (error) throw error;
             return data;
         });
@@ -398,6 +474,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             window.location.replace('index.html');
             return;
         }
+
+        // نقش: فقط مدیر اصلی یا معاون اجازه‌ی ورود به این پنل را دارد
+        const ctx = {
+            isAdmin: pwFlag?.is_admin === true,
+            isDeputy: pwFlag?.is_deputy === true,
+            perms: Array.isArray(pwFlag?.deputy_perms) ? pwFlag.deputy_perms : [],
+            participates: pwFlag?.participates === true
+        };
+        if (!ctx.isAdmin && !ctx.isDeputy) { window.location.replace('member.html'); return; }
+        window.ADMIN_CTX = ctx;
+        sessionStorage.setItem('is_admin', String(ctx.isAdmin));
+        sessionStorage.setItem('is_deputy', String(ctx.isDeputy));
 
         // ۳) pool_id — بدون این، همه‌ی لودرها بی‌صدا return می‌کنن و پنل خالی می‌مونه
         _PID = sessionStorage.getItem('pool_id');
@@ -414,6 +502,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const homeSec = document.getElementById('admin-home-sec');
         if (homeSec) homeSec.classList.remove('hidden');
+        try { applyPermissionsUI(); } catch (permErr) { console.error('applyPermissionsUI', permErr); }
 
         // ۴) چک اشتراک و سپس لودرها
         const isAccessGranted = await checkSubscriptionStatus(_PID);
@@ -681,7 +770,6 @@ window.updateMember = async function() {
     const elMobile = document.getElementById('edit-member-mobile');
     const elAddr = document.getElementById('edit-member-address');
     const elShares = document.getElementById('edit-member-shares');
-    const elAdmin = document.getElementById('edit-member-is-admin');
     const elPass = document.getElementById('edit-member-pass');
     const btn = document.getElementById('edit-save-btn');
 
@@ -701,12 +789,16 @@ window.updateMember = async function() {
 
     // ✅ چک سهمیه بر اساس تفاوت سهم قبلی و جدید (نه فقط عدد جدید)
     const [{ data: oldMember, error: oldErr }, { data: poolNow, error: poolErr }] = await Promise.all([
-        supabaseClient.from('members').select('total_shares').eq('id', memberId).single(),
+        supabaseClient.from('members').select('total_shares, free_shares').eq('id', memberId).single(),
         supabaseClient.from('pools').select('member_capacity').eq('id', poolId).single()
     ]);
     if (oldErr || poolErr) return Swal.fire({ title: 'خطا', text: 'دریافت اطلاعات سهمیه ممکن نشد.', icon: 'error' });
 
-    const shareDelta = newShares - Number(oldMember.total_shares);
+    // سهم رایگان مؤسس (حداکثر ۵ در زمان تأسیس) از سهمیه کم نمی‌شه؛ فقط سهم پولی حساب می‌شه
+    const freeShares = Number(oldMember.free_shares || 0);
+    const paidOld = Math.max(0, Number(oldMember.total_shares) - freeShares);
+    const paidNew = Math.max(0, newShares - freeShares);
+    const shareDelta = paidNew - paidOld;
     if (shareDelta > 0 && shareDelta > Number(poolNow.member_capacity)) {
         return Swal.fire({
             title: 'سهمیه کافی نیست',
@@ -726,9 +818,13 @@ window.updateMember = async function() {
             full_name: elName.value.trim(),
             mobile: elMobile.value.trim(),
             address: elAddr ? elAddr.value.trim() : "",
-            total_shares: newShares,
-            is_admin: elAdmin ? elAdmin.checked : false
+            total_shares: newShares
         };
+        // فقط مدیر اصلی می‌تواند معاون تعیین کند یا دسترسی‌ها را عوض کند
+        const depBoxEdit = document.getElementById('deputy-box-edit');
+        if (window.ADMIN_CTX && window.ADMIN_CTX.isAdmin && depBoxEdit && !depBoxEdit.classList.contains('hidden')) {
+            Object.assign(updateData, getDeputyFormValue('edit'));
+        }
 
     // ۵. اگر رمز جدید وارد شده بود — رمز واقعی ورود (Supabase Auth) رو عوض می‌کنیم، نه یه ستون بی‌ربط
     let passwordResetOk = true;
@@ -783,6 +879,9 @@ window.updateMember = async function() {
  * تابع تراز، تسویه حساب و حذف قطعی عضو
  ************************************************/
 window.handleDeleteWithSettlement = async function() {
+    if (!(window.ADMIN_CTX && window.ADMIN_CTX.isAdmin)) {
+        return Swal.fire({ text: 'حذف عضو فقط توسط مدیر اصلی ممکن است.', icon: 'warning' });
+    }
     const m = selectedMemberForReport;
     if (!m) return Swal.fire({ text: "عضوی انتخاب نشده است!", icon: 'warning' });
 
@@ -882,7 +981,7 @@ window.handleDeleteWithSettlement = async function() {
         } catch (_) {}
 
         // و) برگشت سهمیه سهام این عضو به ظرفیت صندوق
-        const sharesToReturn = Number(m.total_shares || 1);
+        const sharesToReturn = Math.max(0, Number(m.total_shares || 1) - Number(m.free_shares || 0)); // سهم رایگان برنمی‌گرده
         await supabaseClient.rpc('increment_pool_capacity', { p_id: poolId, amount: sharesToReturn });
 
         // ز) پیام موفقیت و رفرش آنی صفحه
@@ -1143,6 +1242,12 @@ window.switchToMemberPanel = async function() {
     // هویت مدیر فعلی رو می‌گیریم — هم برای اسکوپ‌کردن کلید ذخیره‌سازی، هم برای جلوگیری از وصل‌شدن به شماره‌ی خودش
     const { data: { user: currentAdmin } } = await supabaseClient.auth.getUser();
     if (!currentAdmin) return;
+
+    // اگر همین حساب عضو مالی صندوق است، بدون شماره‌ی دوم مستقیم به پنل عضو برو
+    if (window.ADMIN_CTX && window.ADMIN_CTX.participates) {
+        location.href = 'member.html';
+        return;
+    }
 
     const sessionKey = MEMBER_SESSION_KEY + '_' + currentAdmin.id;
     const saved = localStorage.getItem(sessionKey);
@@ -1752,7 +1857,7 @@ async function loadLoanFundQuickview() {
 
     const poolId = sessionStorage.getItem('pool_id');
     try {
-        const { data: members } = await supabaseClient.from('members').select('*').eq('pool_id', poolId).eq('is_admin', false);
+        const { data: members } = await supabaseClient.from('members').select('*').eq('pool_id', poolId).or('is_admin.eq.false,participates.eq.true');
         const { data: txs } = await supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved');
 
         const queue = (members || []).map(m => {
@@ -2040,6 +2145,9 @@ window.createNewProject = async function() {
  * برداشت مدیر از صندوق خیریه (مبلغ + توضیح اجباری)
  ************************************************/
 window.withdrawFromCharity = async function() {
+    if (!(window.ADMIN_CTX && window.ADMIN_CTX.isAdmin)) {
+        return Swal.fire({ text: 'برداشت از صندوق خیریه فقط توسط مدیر اصلی ممکن است.', icon: 'warning' });
+    }
     const poolId = sessionStorage.getItem('pool_id');
     const amountInput = document.getElementById('charity-withdraw-amount');
     const descInput = document.getElementById('charity-withdraw-desc');
@@ -2255,7 +2363,7 @@ async function distributeProfitToMembers(poolId, amount, description) {
             .from('members')
             .select('id, total_shares')
             .eq('pool_id', poolId)
-            .eq('is_admin', false);
+            .or('is_admin.eq.false,participates.eq.true');
 
         if (!members || members.length === 0) {
             console.log("عضویی برای توزیع سود یافت نشد");
@@ -2808,7 +2916,7 @@ window.openEditModalById = async function(memberId) {
     document.getElementById('edit-member-address').value = m.address || '';
     document.getElementById('edit-member-card').value = m.bank_card || '';
     document.getElementById('edit-member-shares').value = m.total_shares || 1;
-    document.getElementById('edit-member-is-admin').checked = m.is_admin || false;
+    setDeputyForm('edit', m);
     document.getElementById('edit-member-pass').value = "";
 
     // پر کردن فیلدهای غیرفعال: کل آورده‌ی اولیه + بدهی اولیه (بعد از تعدیل‌ها)
@@ -3321,6 +3429,11 @@ window.addNewMember = async function() {
         return Swal.fire({text: "تعداد سهم باید حداقل ۱ باشد", icon:'warning'});
     }
 
+    // معاون نمی‌تواند آورده‌ی اولیه یا بدهی اولیه ثبت کند (نیاز به ثبت تراکنش مالی دارد)
+    if (!(window.ADMIN_CTX && window.ADMIN_CTX.isAdmin) && (initialAmount > 0 || totalDebt > 0)) {
+        return Swal.fire({ title: 'محدودیت دسترسی', text: 'ثبت آورده‌ی اولیه و بدهی اولیه فقط توسط مدیر اصلی ممکن است. این مقادیر را صفر بگذارید.', icon: 'warning' });
+    }
+
     // ✅ چک سهمیه‌ی باقی‌مانده‌ی صندوق قبل از هر ثبتی
     const { data: poolNow, error: poolErr } = await supabaseClient.from('pools').select('member_capacity').eq('id', poolId).single();
     if (poolErr) return Swal.fire({ title: 'خطا', text: 'دریافت سهمیه‌ی صندوق ممکن نشد.', icon: 'error' });
@@ -3370,6 +3483,7 @@ window.addNewMember = async function() {
             bank_card: bankCard || null,
             total_shares: shares, // ✅ دقیقاً همون عددی که مدیر وارد کرده
             is_admin: false,
+            ...((window.ADMIN_CTX && window.ADMIN_CTX.isAdmin) ? getDeputyFormValue('new') : { is_deputy: false, deputy_perms: [] }),
             credit_score: 100,
             // عضو دارای بدهی وام نوبتی وارد صف وام نمی‌شود (بعد از تسویه، خودکار وارد صف می‌شود)
             eligible_at: debtLoan > 0 ? null : new Date().toISOString(),
@@ -4499,7 +4613,7 @@ window.loadUnifiedStream = async function() {
             supabaseClient.from('admin_news').select('*').eq('pool_id', pId),
             supabaseClient.from('admin_polls').select('*').eq('pool_id', pId),
             supabaseClient.from('poll_votes').select('poll_id, vote_type'),
-            supabaseClient.from('members').select('id', { count: 'exact', head: true }).eq('pool_id', pId).eq('is_admin', false)
+            supabaseClient.from('members').select('id', { count: 'exact', head: true }).eq('pool_id', pId).or('is_admin.eq.false,participates.eq.true')
         ]);
 
         const totalInPool = membersCountRes.count || 0;
@@ -4736,7 +4850,7 @@ window.sendPushToUnpaid = async function() {
         Swal.showLoading();
         // ۱. پیدا کردن بدهکاران (همان منطق قبلی)
         const firstDay = getJalaliMonthBounds().startISO; // شروع ماه شمسی
-        const { data: members } = await supabaseClient.from('members').select('id').eq('pool_id', poolId).eq('is_admin', false);
+        const { data: members } = await supabaseClient.from('members').select('id').eq('pool_id', poolId).or('is_admin.eq.false,participates.eq.true');
         const { data: paidUsers } = await supabaseClient.from('transactions').select('member_id').eq('pool_id', poolId).eq('status', 'approved').eq('type', 'in').eq('category', 'monthly').gte('created_at', firstDay);
         
         const paidIds = paidUsers.map(p => String(p.member_id));
@@ -4950,7 +5064,8 @@ async function loadAllMembers(poolId) {
         const inCoinDeductionZone = todaysOffset > half;
 
         // مدیر دیگه لازم نیست تو لیست اعضا نشون داده بشه (حساب مدیریتی جداست، نه یه عضو مالی)
-        const filtered = members.filter(m => !m.is_admin);
+        // مدیرِ «عضو مالی» (سهم‌دار) هم توی لیست میاد؛ حساب مدیریتیِ بدون سهم نه
+        const filtered = members.filter(m => !m.is_admin || m.participates === true);
 
         // مرتب‌سازی بر اساس نام
         const sorted = filtered.sort((a, b) => a.full_name.localeCompare(b.full_name));
@@ -4968,14 +5083,14 @@ async function loadAllMembers(poolId) {
             // آواتار (عکس یا حرف اول)
             const avatarContent = m.avatar_url ? 
                 `<img src="${m.avatar_url}" class="w-12 h-12 rounded-full object-cover">` : 
-                `<div class="w-12 h-12 ${m.is_admin ? 'bg-slate-900' : randomColor} rounded-full flex items-center justify-center text-white font-black">${m.is_admin ? '<i class="fas fa-crown text-yellow-400"></i>' : m.full_name.charAt(0)}</div>`;
+                `<div class="w-12 h-12 ${m.is_admin ? 'bg-slate-900' : (m.is_deputy ? 'bg-indigo-600' : randomColor)} rounded-full flex items-center justify-center text-white font-black">${m.is_admin ? '<i class="fas fa-crown text-yellow-400"></i>' : (m.is_deputy ? '<i class="fas fa-user-shield text-white"></i>' : m.full_name.charAt(0))}</div>`;
 
             // مدال‌های افتخار
             const badgesHtml = window.generateMemberBadges ? generateMemberBadges(m) : '';
 
-            // نشانه‌ی پرداخت قسط این ماه — پلکانی (فقط برای اعضای عادی، نه مدیر)
+            // نشانه‌ی پرداخت قسط این ماه — پلکانی (برای اعضای مالی؛ مدیرِ بدون سهم ندارد)
             let paymentDot = '';
-            if (!m.is_admin) {
+            if (!m.is_admin || m.participates === true) {
                 if (paidThisMonth.has(String(m.id))) {
                     paymentDot = `<span title="قسط این ماه پرداخت شده" class="w-2.5 h-2.5 bg-emerald-500 rounded-full shrink-0"></span>`;
                 } else if (inCoinDeductionZone) {
@@ -4991,7 +5106,7 @@ async function loadAllMembers(poolId) {
                     <div class="flex-1 text-right">
                         <div class="flex items-center gap-2">
                             <h4 class="text-[13px] font-[900] text-slate-800">${m.full_name}</h4>
-                            ${m.is_admin ? '<span class="text-[7px] bg-slate-900 text-white px-1.5 py-0.5 rounded">مدیر</span>' : ''}
+                            ${m.is_admin ? '<span class="text-[7px] bg-slate-900 text-white px-1.5 py-0.5 rounded">مدیر</span>' : (m.is_deputy ? '<span class="text-[7px] bg-indigo-600 text-white px-1.5 py-0.5 rounded">معاون</span>' : '')}
                             ${paymentDot}
                         </div>
                         ${badgesHtml}
@@ -5031,7 +5146,7 @@ window.loadOpsTabContent = async function(poolId) {
     try {
         // ۱. دریافت اطلاعات زنده
         const [mRes, tRes] = await Promise.all([
-            supabaseClient.from('members').select('*').eq('pool_id', poolId).eq('is_admin', false),
+            supabaseClient.from('members').select('*').eq('pool_id', poolId).or('is_admin.eq.false,participates.eq.true'),
             supabaseClient.from('transactions').select('*').eq('pool_id', poolId).eq('status', 'approved')
         ]);
 
@@ -5225,7 +5340,7 @@ function renderChatMessage(msg, myId) {
         : `<div class="chat-avatar flex items-center justify-center text-slate-400"><i class="fas fa-user text-[11px]"></i></div>`;
 
     const senderNameHtml = !isMine
-        ? `<p class="chat-sender-name">${sender.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : ''}${sender.full_name || 'عضو'}</p>`
+        ? `<p class="chat-sender-name">${sender.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : (sender.is_deputy ? '<span class="chat-admin-badge" style="background:#0ea5e9">معاون</span>' : '')}${sender.full_name || 'عضو'}</p>`
         : '';
 
     const imageHtml = msg.image_url ? `<img src="${msg.image_url}" onclick="window.open('${msg.image_url}','_blank')">` : '';
@@ -5326,7 +5441,7 @@ window.openGroupChat = async function() {
 
     const { data: msgs, error } = await supabaseClient
         .from('messages')
-        .select('*, members!sender_id(full_name, is_admin, avatar_url)')
+        .select('*, members!sender_id(full_name, is_admin, is_deputy, avatar_url)')
         .eq('pool_id', poolId)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -5347,7 +5462,7 @@ window.openGroupChat = async function() {
     chatChannel = supabaseClient
         .channel('chat-admin-' + poolId)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `pool_id=eq.${poolId}` }, async (payload) => {
-            const { data: sender } = await supabaseClient.from('members').select('full_name, is_admin, avatar_url').eq('id', payload.new.sender_id).maybeSingle();
+            const { data: sender } = await supabaseClient.from('members').select('full_name, is_admin, is_deputy, avatar_url').eq('id', payload.new.sender_id).maybeSingle();
             const fullMsg = { ...payload.new, members: sender };
             const emptyState = listEl.querySelector('.text-center');
             if (emptyState) emptyState.remove();
@@ -5457,7 +5572,7 @@ window.openChatGroupInfo = async function() {
     const poolId = sessionStorage.getItem('pool_id');
     const { data: members, error } = await supabaseClient
         .from('members')
-        .select('id, full_name, avatar_url, is_admin')
+        .select('id, full_name, avatar_url, is_admin, is_deputy')
         .eq('pool_id', poolId)
         .order('is_admin', { ascending: false });
 
@@ -5472,10 +5587,22 @@ window.openChatGroupInfo = async function() {
                 ? `<img src="${m.avatar_url}" class="w-11 h-11 rounded-2xl object-cover">`
                 : `<div class="w-11 h-11 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center"><i class="fas fa-user"></i></div>`}
             <span class="text-[11px] font-black text-slate-700 flex-1 text-right">${m.full_name || 'عضو'}</span>
-            ${m.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : ''}
+            ${m.is_admin ? '<span class="chat-admin-badge">مدیر</span>' : (m.is_deputy ? '<span class="chat-admin-badge" style="background:#0ea5e9">معاون</span>' : '')}
         </div>`).join('');
 };
 
 window.closeChatGroupInfo = function() {
     document.getElementById('chat-group-info-modal')?.classList.add('hidden');
 };
+
+// ریست بخش «معاون» هر بار که فرم ثبت عضو باز می‌شود
+(function () {
+    const _open = window.openAddMemberModal;
+    if (typeof _open === 'function') {
+        window.openAddMemberModal = function () {
+            const r = _open.apply(this, arguments);
+            try { setDeputyForm('new', {}); } catch (_) {}
+            return r;
+        };
+    }
+})();

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+    <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -1202,6 +1202,36 @@
                 <input type="file" id="new-member-docs" class="hidden" onchange="document.getElementById('docs-status-text').innerText='مدارک انتخاب شد ✅'">
             </label>
 
+            <!-- معاون مدیر (فقط مدیر اصلی می‌بیند) -->
+            <div id="deputy-box-new">
+                <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-2xl">
+                    <input type="checkbox" id="new-member-is-deputy" onchange="toggleDeputyPerms('new')" class="w-5 h-5 accent-indigo-600 rounded-lg">
+                    <label for="new-member-is-deputy" class="text-[11px] font-black text-slate-600">معاون مدیر</label>
+                    <i id="new-deputy-chev" class="fas fa-chevron-down mr-auto text-[10px] text-slate-400"></i>
+                </div>
+                <div id="new-deputy-perms" class="hidden mt-2 p-3 bg-indigo-50/60 rounded-2xl space-y-2">
+                    <p class="text-[9px] font-black text-slate-500 leading-relaxed">هر دسترسی که تیک بخورد به معاون داده می‌شود:</p>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="receipts" class="w-4 h-4 accent-indigo-600 rounded" checked> تایید و رد فیش‌ها
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="loans" class="w-4 h-4 accent-indigo-600 rounded"> وام دادن (مساعده، نوبت وام، مساعده سکه)
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="edit_member" class="w-4 h-4 accent-indigo-600 rounded"> ویرایش اعضا
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="register_member" class="w-4 h-4 accent-indigo-600 rounded"> ثبت عضو جدید
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="news" class="w-4 h-4 accent-indigo-600 rounded"> گذاشتن اطلاعیه
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="polls" class="w-4 h-4 accent-indigo-600 rounded"> نظرسنجی
+                    </label>
+                </div>
+            </div>
+
             <!-- دکمه‌های عملیاتی -->
             <div class="flex gap-2 pt-2">
                 <button id="add-member-btn" onclick="addNewMember()" class="flex-1 bg-slate-900 text-white py-3 rounded-2xl font-black text-xs shadow-xl active:scale-95 transition-all">تایید و ثبت نهایی عضو</button>
@@ -1743,10 +1773,34 @@
                 <button type="button" onclick="adjustOpeningDebt()" class="bg-amber-500 text-white px-3 py-2 rounded-xl text-[10px] font-black active:scale-95">اصلاح بدهی</button>
             </div>
 
-            <!-- تیک مدیریت -->
-            <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-2xl">
-                <input type="checkbox" id="edit-member-is-admin" class="w-5 h-5 accent-indigo-600 rounded-lg">
-                <label for="edit-member-is-admin" class="text-[11px] font-black text-slate-600">دسترسی مدیریت</label>
+            <!-- معاون مدیر (فقط مدیر اصلی می‌بیند) -->
+            <div id="deputy-box-edit">
+                <div class="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-2xl">
+                    <input type="checkbox" id="edit-member-is-deputy" onchange="toggleDeputyPerms('edit')" class="w-5 h-5 accent-indigo-600 rounded-lg">
+                    <label for="edit-member-is-deputy" class="text-[11px] font-black text-slate-600">معاون مدیر</label>
+                    <i id="edit-deputy-chev" class="fas fa-chevron-down mr-auto text-[10px] text-slate-400"></i>
+                </div>
+                <div id="edit-deputy-perms" class="hidden mt-2 p-3 bg-indigo-50/60 rounded-2xl space-y-2">
+                    <p class="text-[9px] font-black text-slate-500 leading-relaxed">هر دسترسی که تیک بخورد به معاون داده می‌شود:</p>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="receipts" class="w-4 h-4 accent-indigo-600 rounded" checked> تایید و رد فیش‌ها
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="loans" class="w-4 h-4 accent-indigo-600 rounded"> وام دادن (مساعده، نوبت وام، مساعده سکه)
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="edit_member" class="w-4 h-4 accent-indigo-600 rounded"> ویرایش اعضا
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="register_member" class="w-4 h-4 accent-indigo-600 rounded"> ثبت عضو جدید
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="news" class="w-4 h-4 accent-indigo-600 rounded"> گذاشتن اطلاعیه
+                    </label>
+                    <label class="flex items-center gap-2 text-[11px] font-black text-slate-600">
+                        <input type="checkbox" data-perm="polls" class="w-4 h-4 accent-indigo-600 rounded"> نظرسنجی
+                    </label>
+                </div>
             </div>
 
             <!-- دکمه‌های عملیاتی -->
