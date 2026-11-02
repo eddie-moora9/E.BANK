@@ -1819,6 +1819,43 @@ async function loadMemberNews(poolId) {
 /************************************************
  * تابع لود نظرسنجی‌ها و درخواست‌های جابجایی (v15.2)
  ************************************************/
+
+// نتایج نظرسنجی (فقط تعداد موافق/مخالف؛ هویت رأی‌دهنده‌ها دیده نمی‌شود)
+async function fetchPollResults(pollIds) {
+    const map = {};
+    if (!pollIds || !pollIds.length) return map;
+    try {
+        const { data, error } = await supabaseClient.rpc('get_poll_results', { p_poll_ids: pollIds });
+        if (error) throw error;
+        (data || []).forEach(r => { map[r.poll_id] = { yes: Number(r.yes_count) || 0, no: Number(r.no_count) || 0 }; });
+    } catch (e) { console.error('fetchPollResults failed:', e); }
+    return map;
+}
+
+function pollResultBarsHtml(res, myType) {
+    const yes = res ? res.yes : 0, no = res ? res.no : 0;
+    const total = yes + no;
+    const yesP = total ? Math.round((yes / total) * 100) : 0;
+    const noP = total ? 100 - yesP : 0;
+    const mine = myType === 'yes' ? 'موافق' : (myType === 'no' ? 'مخالف' : '');
+    return `
+        <div class="space-y-3 text-right">
+            <div class="space-y-1">
+                <div class="flex justify-between text-[9px] font-black text-slate-300">
+                    <span>موافق (${yes} نفر)</span><span>${yesP}%</span>
+                </div>
+                <div class="w-full bg-white/10 h-1.5 rounded-full overflow-hidden"><div class="bg-emerald-500 h-full" style="width:${yesP}%"></div></div>
+            </div>
+            <div class="space-y-1">
+                <div class="flex justify-between text-[9px] font-black text-slate-300">
+                    <span>مخالف (${no} نفر)</span><span>${noP}%</span>
+                </div>
+                <div class="w-full bg-white/10 h-1.5 rounded-full overflow-hidden"><div class="bg-rose-500 h-full" style="width:${noP}%"></div></div>
+            </div>
+            <p class="text-center text-emerald-400 text-[9px] font-black italic pt-1">رای شما${mine ? ' (' + mine + ')' : ''} ثبت شده است ✅ — مجموع ${total} رأی</p>
+        </div>`;
+}
+
 async function loadActivePoll(userId, poolId) {
     const container = document.getElementById('active-polls-list');
     if (!container) return;
@@ -1899,9 +1936,9 @@ async function loadActivePoll(userId, poolId) {
  * تابع نمایش نتایج نظرسنجی (هماهنگ با استایل جدید)
  ************************************************/
 async function renderPollResults(pollId, question, container) {
-    const { data: votes } = await supabaseClient.from('poll_votes').select('vote_type').eq('poll_id', pollId);
-    const yes = votes ? votes.filter(v => v.vote_type === 'yes').length : 0;
-    const no = votes ? votes.filter(v => v.vote_type === 'no').length : 0;
+    const rmap = await fetchPollResults([pollId]);
+    const r = rmap[pollId] || { yes: 0, no: 0 };
+    const yes = r.yes, no = r.no;
     const total = yes + no || 1;
     const yesP = Math.round((yes / total) * 100);
 
@@ -2141,6 +2178,10 @@ window.loadUnifiedComm = async function(poolId) {
             supabaseClient.from('poll_votes').select('*').eq('member_id', uId)
         ]);
 
+        // نتیجه‌ی نظرسنجی‌هایی که خودم رأی داده‌ام (بدون افشای هویت رأی‌دهنده‌ها)
+        const votedPollIds = (votesRes.data || []).map(v => v.poll_id);
+        const pollResultsMap = await fetchPollResults(votedPollIds);
+
         let stream = [];
         if (newsRes.data) newsRes.data.forEach(n => stream.push({ ...n, sType: 'news' }));
         if (pollsRes.data) pollsRes.data.forEach(p => stream.push({ ...p, sType: 'poll' }));
@@ -2181,11 +2222,8 @@ window.loadUnifiedComm = async function(poolId) {
                                 <button onclick="event.stopPropagation(); submitPollVote(${item.id}, 'no')" class="bg-rose-500 text-white py-2.5 rounded-2xl font-black text-[10px] active:scale-95 shadow-lg">مخالفم ❌</button>
                             </div>
                         ` : `
-                            <!-- اگر رای داده باشد، پیام تایید نشان بده 👇 -->
-                            <div class="text-center">
-                                <p class="text-emerald-400 text-[9px] font-black italic">رای شما با موفقیت ثبت شده است ✅</p>
-                                <p class="text-[7px] text-slate-500 mt-1 uppercase font-bold">Thank you for participating</p>
-                            </div>
+                            <!-- اگر رای داده باشد، نتیجه‌ی نظرسنجی را نشان بده 👇 -->
+                            ${pollResultBarsHtml(pollResultsMap[item.id], myVote.vote_type)}
                         `}
                     </div>
                 </div>`;
